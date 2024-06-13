@@ -72,6 +72,18 @@ class Database:
             return None
         return user_dict[key]
 
+    def add_event(self, team_1: str, team_2: str, time: datetime):
+        event = {
+            'team_1': team_1,
+            'team_2': team_2,
+            'time': time,
+            'final_score': ''
+        }
+        self.events_collection.insert_one(event)
+
+    def get_all_events(self) -> list:
+        return list(self.events_collection.find())
+
     def set_user_attribute(self, user_id: int, key: str, value: Any):
         self.check_if_user_exists(user_id=user_id, raise_error=True)
         self.user_collection.update_one({'_id': user_id}, {'$set': {key: value}})
