@@ -1,21 +1,25 @@
 import locale
-from datetime import datetime
+import logging
+import traceback
+from datetime import datetime, timezone
 
 import pytz
 import telebot
-from telebot.types import User
+from telebot.types import User, InlineKeyboardMarkup, InlineKeyboardButton
 
+import callback_data_utils
 import constants
 import credentials
 import datetime_utils
 import telegram_utils
 import utils
 from database import Database
-from models import Event, EventResult
+from models import Event, EventResult, Bet
 
 locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
 bot = telebot.TeleBot(credentials.TELEGRAM_TOKEN)
 database = Database()
+logging.basicConfig(filename='totalizator.log', encoding='utf-8', level=logging.INFO)
 
 
 @bot.message_handler(commands=['start'])
@@ -24,7 +28,7 @@ def start(message):
     if not is_club_member(user=user):
         return
     save_user_or_update_interaction(user=user)
-    bot.send_message(chat_id=message.chat.id, text='Доступ к боту предоставлен')
+    bot.send_message(chat_id=message.chat.id, text='Доступ к боту предоставлен. Начни с команды /coming_events.')
     pass
 
 
@@ -79,8 +83,8 @@ def set_result_for_event(message):
         timezone_to=pytz.utc
     )
 
-    team_1_scores = split[3].split(':')[0]
-    team_2_scores = split[3].split(':')[1]
+    team_1_scores = int(split[3].split(':')[0])
+    team_2_scores = int(split[3].split(':')[1])
 
     existing_event = database.find_event(team_1=team_1, team_2=team_2, time=event_datetime_utc)
     if not existing_event:
@@ -135,39 +139,41 @@ def get_coming_events(message):
     if not is_club_member(user=user):
         return
     save_user_or_update_interaction(user=user)
-    events = database.get_all_events()
-    result_events = []
-    for event in events:
-        event_time = event.time
-        if event_time <= datetime.now(event_time.tzinfo):
-            continue
-        result_events.append(event)
-        if len(result_events) >= 4:
-            break
+    send_coming_events(user=user, chat_id=message.chat.id)
 
-    if len(result_events) == 0:
-        bot.send_message(chat_id=message.chat.id, text="Матчей не обнаружено")
+
+@bot.message_handler(commands=['clear_context'])
+def clear_current_event(message):
+    user = message.from_user
+    if not is_club_member(user=user):
         return
-
-    text = ''
-    for event in result_events:
-        moscow_time = datetime_utils.with_zone_same_instant(
-            datetime_obj=event['time'],
-            timezone_from=pytz.utc,
-            timezone_to=pytz.timezone('Europe/Moscow'),
-        )
-        text += f"{event.team_1} - {event.team_2}, {datetime_utils.to_display_string(moscow_time)}"
-        text += '\n'
-
-    bot.send_message(chat_id=message.chat.id, text=text.strip())
+    save_user_or_update_interaction(user=user)
+    database.clear_current_event_for_user(user_id=user.id)
+    bot.send_message(chat_id=message.chat.id, text='OK')
 
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     user = call.from_user
+    chat_id = call.message.chat.id
     if not is_club_member(user=user):
         return
     save_user_or_update_interaction(user=user)
+    try:
+        if callback_data_utils.is_make_bet_callback_data(call.data):
+            event_uuid = callback_data_utils.extract_uuid_from_make_bet_callback_data(call.data)
+            event = database.get_event_by_uuid(uuid=event_uuid)
+            if event is None:
+                bot.send_message(chat_id=chat_id, text='Матч не найден :/')
+                return
+            database.save_current_event_to_user(user_id=user.id, event_uuid=event.uuid)
+            msg = (f'Укажи счёт, с которым завершится основное время матча '
+                   f'{event.team_1} - {event.team_2}. '
+                   f'Формат сообщения: \"X:X\" (например, \"1:0\").')
+            bot.send_message(chat_id=chat_id, text=msg)
+
+    except Exception as e:
+        handle_exception(e=e, user=user, chat_id=chat_id)
 
 
 @bot.message_handler(content_types=['text'])
@@ -176,8 +182,51 @@ def get_text_messages(message):
     if not is_club_member(user=user):
         return
     save_user_or_update_interaction(user=user)
-    chat_id = message.chat.id
-    text = message.text
+    current_event = database.get_current_event_for_user(user_id=user.id)
+    if not current_event:
+        bot.send_message(chat_id=message.chat.id, text='Чтобы сделать прогноз, используй команду /coming_events.')
+        return
+    event = database.get_event_by_uuid(uuid=current_event)
+    if not event:
+        bot.send_message(chat_id=message.chat.id, text='Произошла ошибка. Попробуй повторить с начала.')
+        database.clear_current_event_for_user(user_id=user.id)
+        return
+
+    wrong_format_msg = 'Укажи счёт в формате \"X:X\" (например, \"1:0\"). Отменить: /clear_context.'
+    if len(message.text) != 3:
+        bot.send_message(chat_id=message.chat.id, text=wrong_format_msg)
+        return
+
+    split_result = message.text.split(':')
+    if len(split_result) != 2:
+        bot.send_message(chat_id=message.chat.id, text=wrong_format_msg)
+        return
+
+    existing_bet = database.find_bet(user_id=user.id, event_uuid=event.uuid)
+    if existing_bet:
+        msg = f'Ты уже сделал прогноз на этот матч ({existing_bet.team_1_scores}:{existing_bet.team_2_scores})'
+        bot.send_message(chat_id=message.chat.id, text=msg)
+        database.clear_current_event_for_user(user_id=user.id)
+        return
+
+    try:
+        team_1_scores = int(split_result[0])
+        team_2_scores = int(split_result[1])
+        bet = Bet(
+            user_id=user.id,
+            event_uuid=event.uuid,
+            team_1_scores=team_1_scores,
+            team_2_scores=team_2_scores,
+            created_at=datetime.now(timezone.utc)
+        )
+        database.add_bet(user_id=user.id, bet=bet)
+        database.clear_current_event_for_user(user_id=user.id)
+        bot.send_message(chat_id=message.chat.id,
+                         text=f'Принято: {event.team_1} - {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
+        send_coming_events(user=user, chat_id=message.chat.id)
+    except:
+        bot.send_message(chat_id=message.chat.id, text=wrong_format_msg)
+        return
 
 
 def is_club_member(user: User) -> bool:
@@ -199,6 +248,64 @@ def save_user_or_update_interaction(user: User):
         database.update_last_interaction(user_id=user.id)
     else:
         bot.send_message(chat_id=credentials.MAINTAINER_ID, text=f'New user: {user.full_name} ({user.username})')
+
+
+def handle_exception(e: Exception, user: User, chat_id: int):
+    logging.exception(e)
+    bot.send_message(chat_id=chat_id, text='Что-то пошло не так, произошла ошибка :(')
+    from_user = f'{user.full_name} (f{user.username}). '
+    error_message = 'Произошла ошибка. ' + ''.join(traceback.TracebackException.from_exception(e).format())
+    bot.send_message(chat_id=credentials.MAINTAINER_ID, text=from_user + error_message)
+
+
+def send_coming_events(user: User, chat_id: int):
+    max_events_in_message = 5
+    events = database.get_all_events()
+    coming_events = []
+    for event in events:
+        event_time = event.time.replace(tzinfo=timezone.utc)
+        if event_time <= datetime.now(timezone.utc):
+            continue
+        coming_events.append(event)
+        if len(coming_events) >= max_events_in_message:
+            break
+
+    if len(coming_events) == 0:
+        bot.send_message(chat_id=chat_id, text="Матчей не обнаружено")
+        return
+
+    text = ''
+    index = 0
+    events_available_for_bet_with_index = []
+    for event in coming_events:
+        index += 1
+        moscow_time = datetime_utils.with_zone_same_instant(
+            datetime_obj=event.time,
+            timezone_from=pytz.utc,
+            timezone_to=pytz.timezone('Europe/Moscow'),
+        )
+        text += f'{index}. {event.team_1} - {event.team_2}, {datetime_utils.to_display_string(moscow_time)}'
+        existing_bet = database.find_bet(user_id=user.id, event_uuid=event.uuid)
+        if existing_bet is not None:
+            text += f'(прогноз {existing_bet.team_1_scores}:{existing_bet.team_2_scores})'
+        else:
+            events_available_for_bet_with_index.append((index, event))
+        text += '\n'
+
+    if len(events_available_for_bet_with_index) == 0:
+        bot.send_message(chat_id=chat_id, text=text.strip())
+        return
+
+    text += '\nВыбери матч, на который хотел бы сделать прогноз.'
+    buttons_list = []
+    for (i, event) in events_available_for_bet_with_index:
+        callback_data = callback_data_utils.create_make_bet_callback_data(event)
+        button = InlineKeyboardButton(i, callback_data=callback_data)
+        buttons_list.append(button)
+
+    markup = InlineKeyboardMarkup()
+    markup.row(*buttons_list)
+    bot.send_message(chat_id=chat_id, text=text.strip(), reply_markup=markup)
 
 
 if __name__ == '__main__':

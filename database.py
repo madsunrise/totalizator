@@ -4,7 +4,7 @@ from typing import Any
 from pymongo import MongoClient
 
 import mapper
-from models import Event
+from models import Event, Bet
 
 
 class Database:
@@ -74,12 +74,36 @@ class Database:
         new_value = max(current_value + amount, 0)
         self.set_user_attribute(user_id=user_id, key='scores', value=new_value)
 
-    def get_user_attribute(self, user_id: int, key: str):
+    def add_bet(self, user_id: int, bet: Bet):
         self.check_if_user_exists(user_id=user_id, raise_error=True)
-        user_dict = self.user_collection.find_one({'_id': user_id})
-        if key not in user_dict:
-            return None
-        return user_dict[key]
+        bet_dict = mapper.bet_to_dict(bet)
+        current_bets = self.get_user_attribute(user_id=user_id, key='bets')
+        current_bets.append(bet_dict)
+        self.set_user_attribute(user_id=user_id, key='bets', value=current_bets)
+
+    def get_user_bets(self, user_id: int) -> list:
+        self.check_if_user_exists(user_id=user_id, raise_error=True)
+        result = self.get_user_attribute(user_id=user_id, key='bets')
+        result = list(map(lambda x: mapper.parse_bet(x), result))
+        result.sort(key=lambda x: x.created_at, reverse=False)
+        return result
+
+    def find_bet(self, user_id: int, event_uuid: str) -> Bet | None:
+        self.check_if_user_exists(user_id=user_id, raise_error=True)
+        all_bets = self.get_user_bets(user_id=user_id)
+        return next((bet for bet in all_bets if bet.event_uuid == event_uuid), None)
+
+    def get_current_event_for_user(self, user_id: int) -> str | None:
+        self.check_if_user_exists(user_id=user_id, raise_error=True)
+        return self.get_user_attribute(user_id=user_id, key='current_event')
+
+    def save_current_event_to_user(self, user_id: int, event_uuid: str):
+        self.check_if_user_exists(user_id=user_id, raise_error=True)
+        self.set_user_attribute(user_id=user_id, key='current_event', value=event_uuid)
+
+    def clear_current_event_for_user(self, user_id: int):
+        self.check_if_user_exists(user_id=user_id, raise_error=True)
+        self.delete_user_attribute(user_id=user_id, key='current_event')
 
     def add_event(self, event: Event):
         existing = self.find_event(team_1=event.team_1, team_2=event.team_2, time=event.time)
@@ -113,6 +137,13 @@ class Database:
             {'uuid': event.uuid},
             {'$set': event_dict}
         )
+
+    def get_user_attribute(self, user_id: int, key: str):
+        self.check_if_user_exists(user_id=user_id, raise_error=True)
+        user_dict = self.user_collection.find_one({'_id': user_id})
+        if key not in user_dict:
+            return None
+        return user_dict[key]
 
     def set_user_attribute(self, user_id: int, key: str, value: Any):
         self.check_if_user_exists(user_id=user_id, raise_error=True)

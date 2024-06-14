@@ -21,3 +21,19 @@ class Event:
         self.team_2 = team_2
         self.time = time
         self.result = result
+
+
+class Bet:
+
+    def __init__(self,
+                 user_id: int,
+                 event_uuid: str,
+                 team_1_scores: int,
+                 team_2_scores: int,
+                 created_at: datetime,
+                 ):
+        self.user_id = user_id
+        self.event_uuid = event_uuid
+        self.team_1_scores = team_1_scores
+        self.team_2_scores = team_2_scores
+        self.created_at = created_at

@@ -1,4 +1,4 @@
-from models import Event, EventResult
+from models import Event, EventResult, Bet
 
 
 def event_to_dict(event: Event) -> dict:
@@ -28,4 +28,24 @@ def parse_event(event_dict: dict) -> Event:
         team_2=event_dict['team_2'],
         time=event_dict['time'],
         result=result_obj
+    )
+
+
+def bet_to_dict(bet: Bet) -> dict:
+    return {
+        'user_id': bet.user_id,
+        'event_uuid': bet.event_uuid,
+        'team_1_scores': bet.team_1_scores,
+        'team_2_scores': bet.team_2_scores,
+        'created_at': bet.created_at,
+    }
+
+
+def parse_bet(bet_dict: dict) -> Bet:
+    return Bet(
+        user_id=bet_dict['user_id'],
+        event_uuid=bet_dict['event_uuid'],
+        team_1_scores=bet_dict['team_1_scores'],
+        team_2_scores=bet_dict['team_2_scores'],
+        created_at=bet_dict['created_at'],
     )
