@@ -236,6 +236,12 @@ def get_text_messages(message):
         bot.send_message(chat_id=message.chat.id, text=wrong_format_msg)
         return
 
+    if is_event_already_started(event):
+        msg = f'Матч уже начался, досвидули!'
+        bot.send_message(chat_id=message.chat.id, text=msg)
+        database.clear_current_event_for_user(user_id=user.id)
+        return
+
     existing_bet = database.find_bet(user_id=user.id, event_uuid=event.uuid)
     if existing_bet:
         msg = f'Ты уже сделал прогноз на этот матч ({existing_bet.team_1_scores}:{existing_bet.team_2_scores})'
@@ -376,6 +382,11 @@ def is_same_winner(result: EventResult, bet: Bet) -> bool:
     if result.team_1_scores < result.team_2_scores:
         return bet.team_1_scores < bet.team_2_scores
     return bet.team_1_scores == bet.team_2_scores
+
+
+def is_event_already_started(event: Event) -> bool:
+    event_time = event.time.replace(tzinfo=timezone.utc)
+    return event_time <= datetime.now(timezone.utc)
 
 
 if __name__ == '__main__':
