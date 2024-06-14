@@ -101,6 +101,7 @@ def set_result_for_event(message):
         team_2_scores=team_2_scores
     )
     database.update_event(event=existing_event)
+    calculate_scores_for_event(event=existing_event)
     bot.send_message(
         chat_id=message.chat.id,
         text=f'OK, {existing_event.team_1} - {existing_event.team_2} ' +
@@ -128,7 +129,7 @@ def get_all_events(message):
         text += f"{event.team_1} - {event.team_2}, {datetime_utils.to_display_string(moscow_time)}"
         event_result = event.result
         if event_result:
-            text += f' ({event_result.team_1_scores} : {event_result.team_2_scores})'
+            text += f' ({event_result.team_1_scores}:{event_result.team_2_scores})'
         text += f'\nUUID: {event.uuid}'
         text += '\n\n'
     bot.send_message(chat_id=message.chat.id, text=text.strip())
@@ -335,6 +336,40 @@ def send_coming_events(user: User, chat_id: int):
     markup = InlineKeyboardMarkup()
     markup.row(*buttons_list)
     bot.send_message(chat_id=chat_id, text=text.strip(), reply_markup=markup)
+
+
+def calculate_scores_for_event(event: Event):
+    result = event.result
+    if result is None:
+        raise ValueError('Event does not have result')
+    users = database.get_all_users()
+    for user_dict in users:
+        user_id = user_dict['_id']
+        bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
+        if bet is None:
+            logging.warning(f'User {user_dict['username']} has no bets on event, using default bet 0:0')
+            bet = Bet(
+                user_id=user_id,
+                event_uuid=event.uuid,
+                team_1_scores=0,
+                team_2_scores=0,
+                created_at=datetime.now(timezone.utc)
+            )
+        scores_earned = 0
+        if result.team_1_scores == bet.team_1_scores and result.team_2_scores == bet.team_2_scores:
+            scores_earned = 2
+        elif is_same_winner(result=result, bet=bet):
+            scores_earned = 1
+        if scores_earned > 0:
+            database.add_scores_to_user(user_id=user_id, amount=scores_earned)
+
+
+def is_same_winner(result: EventResult, bet: Bet) -> bool:
+    if result.team_1_scores > result.team_2_scores:
+        return bet.team_1_scores > bet.team_2_scores
+    if result.team_1_scores < result.team_2_scores:
+        return bet.team_1_scores < bet.team_2_scores
+    return bet.team_1_scores == bet.team_2_scores
 
 
 if __name__ == '__main__':
