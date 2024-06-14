@@ -101,12 +101,17 @@ def set_result_for_event(message):
         team_2_scores=team_2_scores
     )
     database.update_event(event=existing_event)
-    calculate_scores_for_event(event=existing_event)
+    calculate_scores_after_finished_event(event=existing_event)
     bot.send_message(
         chat_id=message.chat.id,
-        text=f'OK, {existing_event.team_1} - {existing_event.team_2} ' +
+        text=f'OK, {existing_event.team_1} – {existing_event.team_2} ' +
              f'{existing_event.result.team_1_scores}:{existing_event.result.team_2_scores}'
     )
+    msg_text = (f'Матч {existing_event.team_1} – {existing_event.team_2} завершился ' +
+                f'({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores})')
+    msg_text += '\n\n'
+    msg_text += get_leaderboard_text()
+    bot.send_message(chat_id=constants.TARGET_CHAT_ID, text=msg_text)
 
 
 @bot.message_handler(commands=['events'])
@@ -126,7 +131,7 @@ def get_all_events(message):
             timezone_from=pytz.utc,
             timezone_to=pytz.timezone('Europe/Moscow'),
         )
-        text += f"{event.team_1} - {event.team_2}, {datetime_utils.to_display_string(moscow_time)}"
+        text += f"{event.team_1} – {event.team_2}, {datetime_utils.to_display_string(moscow_time)}"
         event_result = event.result
         if event_result:
             text += f' ({event_result.team_1_scores}:{event_result.team_2_scores})'
@@ -189,10 +194,19 @@ def get_coming_events(message):
             timezone_from=pytz.utc,
             timezone_to=pytz.timezone('Europe/Moscow'),
         )
-        text += (f'{event.team_1} - {event.team_2} ({moscow_time.strftime('%d %b')}): '
+        text += (f'{event.team_1} – {event.team_2} ({moscow_time.strftime('%d %b')}): '
                  f'{bet.team_1_scores}:{bet.team_2_scores}')
         text += '\n\n'
     bot.send_message(chat_id=message.chat.id, text=text)
+
+
+@bot.message_handler(commands=['leaderboard'])
+def get_leaderboard(message):
+    user = message.from_user
+    if not is_club_member(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    bot.send_message(chat_id=message.chat.id, text=get_leaderboard_text())
 
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -211,7 +225,7 @@ def callback_query(call):
                 return
             database.save_current_event_to_user(user_id=user.id, event_uuid=event.uuid)
             msg = (f'Укажи счёт, с которым завершится основное время матча '
-                   f'{event.team_1} - {event.team_2}. '
+                   f'{event.team_1} – {event.team_2}. '
                    f'Формат сообщения: \"X:X\" (например, \"1:0\").')
             bot.send_message(chat_id=chat_id, text=msg)
 
@@ -271,9 +285,9 @@ def get_text_messages(message):
         database.add_bet(user_id=user.id, bet=bet)
         database.clear_current_event_for_user(user_id=user.id)
         bot.send_message(chat_id=message.chat.id,
-                         text=f'Принято: {event.team_1} - {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
+                         text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
         send_coming_events(user=user, chat_id=message.chat.id)
-        msg_for_everybody = f'{user.full_name} сделал прогноз на матч {event.team_1} - {event.team_2}'
+        msg_for_everybody = f'{user.full_name} сделал прогноз на матч {event.team_1} – {event.team_2}'
         bot.send_message(chat_id=constants.TARGET_CHAT_ID, text=msg_for_everybody)
     except:
         bot.send_message(chat_id=message.chat.id, text=wrong_format_msg)
@@ -335,7 +349,7 @@ def send_coming_events(user: User, chat_id: int):
             timezone_from=pytz.utc,
             timezone_to=pytz.timezone('Europe/Moscow'),
         )
-        text += f'{index}. {event.team_1} - {event.team_2}, {datetime_utils.to_display_string(moscow_time)}'
+        text += f'{index}. {event.team_1} – {event.team_2}, {datetime_utils.to_display_string(moscow_time)}'
         existing_bet = database.find_bet(user_id=user.id, event_uuid=event.uuid)
         if existing_bet is not None:
             text += f' (прогноз {existing_bet.team_1_scores}:{existing_bet.team_2_scores})'
@@ -359,7 +373,7 @@ def send_coming_events(user: User, chat_id: int):
     bot.send_message(chat_id=chat_id, text=text.strip(), reply_markup=markup)
 
 
-def calculate_scores_for_event(event: Event):
+def calculate_scores_after_finished_event(event: Event):
     result = event.result
     if result is None:
         raise ValueError('Event does not have result')
@@ -396,6 +410,16 @@ def is_same_winner(result: EventResult, bet: Bet) -> bool:
 def is_event_already_started(event: Event) -> bool:
     event_time = event.time.replace(tzinfo=timezone.utc)
     return event_time <= datetime.now(timezone.utc)
+
+
+def get_leaderboard_text() -> str:
+    users = database.get_all_users()
+    users.sort(key=lambda x: x.scores, reverse=True)
+    text = ''
+    for user in users:
+        text += f'{user.get_full_name()}: {user.scores}'
+        text += '\n'
+    return text.strip()
 
 
 if __name__ == '__main__':
