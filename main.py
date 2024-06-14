@@ -134,7 +134,7 @@ def get_all_events(message):
         event_result = event.result
         if event_result:
             text += f' ({event_result.team_1_scores} : {event_result.team_2_scores})'
-        text += '\n'
+        text += '\n\n'
     bot.send_message(chat_id=message.chat.id, text=text.strip())
 
 
@@ -320,10 +320,10 @@ def send_coming_events(user: User, chat_id: int):
         text += f'{index}. {event.team_1} - {event.team_2}, {datetime_utils.to_display_string(moscow_time)}'
         existing_bet = database.find_bet(user_id=user.id, event_uuid=event.uuid)
         if existing_bet is not None:
-            text += f'(прогноз {existing_bet.team_1_scores}:{existing_bet.team_2_scores})'
+            text += f' (прогноз {existing_bet.team_1_scores}:{existing_bet.team_2_scores})'
         else:
             events_available_for_bet_with_index.append((index, event))
-        text += '\n'
+        text += '\n\n'
 
     if len(events_available_for_bet_with_index) == 0:
         bot.send_message(chat_id=chat_id, text=text.strip())
