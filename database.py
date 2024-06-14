@@ -81,7 +81,7 @@ class Database:
         current_bets.append(bet_dict)
         self.set_user_attribute(user_id=user_id, key='bets', value=current_bets)
 
-    def get_user_bets(self, user_id: int) -> list:
+    def get_all_user_bets(self, user_id: int) -> list:
         self.check_if_user_exists(user_id=user_id, raise_error=True)
         result = self.get_user_attribute(user_id=user_id, key='bets')
         result = list(map(lambda x: mapper.parse_bet(x), result))
@@ -90,7 +90,7 @@ class Database:
 
     def find_bet(self, user_id: int, event_uuid: str) -> Bet | None:
         self.check_if_user_exists(user_id=user_id, raise_error=True)
-        all_bets = self.get_user_bets(user_id=user_id)
+        all_bets = self.get_all_user_bets(user_id=user_id)
         return next((bet for bet in all_bets if bet.event_uuid == event_uuid), None)
 
     def get_current_event_for_user(self, user_id: int) -> str | None:

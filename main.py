@@ -152,6 +152,32 @@ def clear_current_event(message):
     bot.send_message(chat_id=message.chat.id, text='OK')
 
 
+@bot.message_handler(commands=['my_bets'])
+def get_coming_events(message):
+    user = message.from_user
+    if not is_club_member(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    all_bets = database.get_all_user_bets(user_id=user.id)
+    if len(all_bets) == 0:
+        msg = 'Пока ничего нет. Начни с команды /coming_events.'
+        bot.send_message(chat_id=message.chat.id, text=msg)
+        return
+    text = ''
+    for bet in all_bets:
+        event = database.get_event_by_uuid(uuid=bet.event_uuid)
+        if event is None:
+            continue
+        moscow_time = datetime_utils.with_zone_same_instant(
+            datetime_obj=event.time,
+            timezone_from=pytz.utc,
+            timezone_to=pytz.timezone('Europe/Moscow'),
+        )
+        text += f'{event.team_1} - {event.team_2} ({moscow_time.strftime('%d %b')}): {bet.team_1_scores}:{bet.team_2_scores}'
+        text += '\n\n'
+    bot.send_message(chat_id=message.chat.id, text=text)
+
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     user = call.from_user
@@ -224,6 +250,8 @@ def get_text_messages(message):
         bot.send_message(chat_id=message.chat.id,
                          text=f'Принято: {event.team_1} - {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
         send_coming_events(user=user, chat_id=message.chat.id)
+        msg_for_everybody = f'{user.full_name} сделал прогноз на матч {event.team_1} - {event.team_2}'
+        bot.send_message(chat_id=constants.TARGET_CHAT_ID, text=msg_for_everybody)
     except:
         bot.send_message(chat_id=message.chat.id, text=wrong_format_msg)
         return
