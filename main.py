@@ -10,7 +10,7 @@ import credentials
 import datetime_utils
 import telegram_utils
 from database import Database
-from models import Event
+from models import Event, EventResult
 
 locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
 bot = telebot.TeleBot(credentials.TELEGRAM_TOKEN)
@@ -28,14 +28,14 @@ def start(message):
 
 
 # Service method
-# Формат сообщения: "Германия;Шотландия;14.06.2024 22:00"
+# Формат сообщения: "Германия; Шотландия; 14.06.2024 22:00"
 @bot.message_handler(commands=['add_event'])
 def add_event(message):
     user = message.from_user
     if not is_maintainer(user=user):
         return
     save_user_or_update_interaction(user=user)
-    split = message.text.removeprefix('/add_event').strip().split(';')
+    split = list(map(lambda x: x.strip(), message.text.removeprefix('/add_event').strip().split(';')))
     team_1 = split[0]
     team_2 = split[1]
 
@@ -55,6 +55,51 @@ def add_event(message):
     )
     database.add_event(event)
     bot.send_message(chat_id=message.chat.id, text='Матч добавлен')
+
+
+# Service method
+# Формат сообщения: "Германия; Шотландия; 14.06.2024 22:00; 2:1"
+@bot.message_handler(commands=['set_result'])
+def set_result_for_event(message):
+    user = message.from_user
+    if not is_maintainer(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    split = list(map(lambda x: x.strip(), message.text.removeprefix('/set_result').strip().split(';')))
+    team_1 = split[0]
+    team_2 = split[1]
+
+    date_format = '%d.%m.%Y %H:%M'
+    datetime_obj = datetime.strptime(split[2], date_format)
+    event_datetime_utc = datetime_utils.with_zone_same_instant(
+        datetime_obj=datetime_obj,
+        timezone_from=pytz.timezone('Europe/Moscow'),
+        timezone_to=pytz.utc
+    )
+
+    team_1_scores = split[3].split(':')[0]
+    team_2_scores = split[3].split(':')[1]
+
+    existing_event = database.find_event(team_1=team_1, team_2=team_2, time=event_datetime_utc)
+    if not existing_event:
+        bot.send_message(chat_id=message.chat.id, text='Такой матч не найден :/')
+        return
+
+    if existing_event.result:
+        msg = f'У матча уже есть результат ({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores})'
+        bot.send_message(chat_id=message.chat.id, text=msg)
+        return
+
+    existing_event.result = EventResult(
+        team_1_scores=team_1_scores,
+        team_2_scores=team_2_scores
+    )
+    database.update_event(event=existing_event)
+    bot.send_message(
+        chat_id=message.chat.id,
+        text=f'OK, {existing_event.team_1} - {existing_event.team_2} ' +
+             f'{existing_event.result.team_1_scores}:{existing_event.result.team_2_scores}'
+    )
 
 
 @bot.message_handler(commands=['events'])

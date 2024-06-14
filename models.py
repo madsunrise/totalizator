@@ -13,7 +13,7 @@ class Event:
                  team_1: str,
                  team_2: str,
                  time: datetime,
-                 result: EventResult = None,
+                 result: EventResult | None = None,
                  ):
         self.team_1 = team_1
         self.team_2 = team_2
