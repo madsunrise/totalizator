@@ -27,7 +27,10 @@ class Database:
         return result is not None
 
     def get_all_users(self):
-        return self.user_collection.find()
+        result = list(self.user_collection.find())
+        result = list(map(lambda x: mapper.parse_user(x), result))
+        result.sort(key=lambda x: x.username, reverse=False)
+        return result
 
     def get_user(self, user_id: int):
         return self.user_collection.find_one({'_id': user_id})

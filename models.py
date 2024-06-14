@@ -37,3 +37,29 @@ class Bet:
         self.team_1_scores = team_1_scores
         self.team_2_scores = team_2_scores
         self.created_at = created_at
+
+
+class UserModel:
+    def __init__(self,
+                 id: int,
+                 username: str,
+                 first_name: str,
+                 last_name: str,
+                 last_interaction: datetime,
+                 created_at: datetime,
+                 scores: int,
+                 bets: list,
+                 ):
+        self.id = id
+        self.username = username
+        self.first_name = first_name
+        self.last_name = last_name
+        self.last_interaction = last_interaction
+        self.created_at = created_at
+        self.scores = scores
+        self.bets = bets
+
+    def get_full_name(self) -> str:
+        if self.last_name:
+            return f'{self.first_name} {self.last_name}'
+        return self.first_name

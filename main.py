@@ -364,11 +364,11 @@ def calculate_scores_for_event(event: Event):
     if result is None:
         raise ValueError('Event does not have result')
     users = database.get_all_users()
-    for user_dict in users:
-        user_id = user_dict['_id']
+    for user_model in users:
+        user_id = user_model.id
         bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
         if bet is None:
-            logging.warning(f'User {user_dict['username']} has no bets on event, using default bet 0:0')
+            logging.warning(f'User {user_model.username} has no bets on event, using default bet 0:0')
             bet = Bet(
                 user_id=user_id,
                 event_uuid=event.uuid,

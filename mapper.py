@@ -1,4 +1,4 @@
-from models import Event, EventResult, Bet
+from models import Event, EventResult, Bet, UserModel
 
 
 def event_to_dict(event: Event) -> dict:
@@ -48,4 +48,30 @@ def parse_bet(bet_dict: dict) -> Bet:
         team_1_scores=bet_dict['team_1_scores'],
         team_2_scores=bet_dict['team_2_scores'],
         created_at=bet_dict['created_at'],
+    )
+
+
+def user_to_dict(user: UserModel) -> dict:
+    return {
+        '_id': user.id,
+        'username': user.username,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'last_interaction': user.last_interaction,
+        'created_at': user.created_at,
+        'scores': user.scores,
+        'bets': list(map(lambda x: bet_to_dict(x), user.bets)),
+    }
+
+
+def parse_user(user_dict: dict) -> UserModel:
+    return UserModel(
+        id=user_dict['_id'],
+        username=user_dict['username'],
+        first_name=user_dict['first_name'],
+        last_name=user_dict['last_name'],
+        last_interaction=user_dict['last_interaction'],
+        created_at=user_dict['created_at'],
+        scores=user_dict['scores'],
+        bets=list(map(lambda x: parse_bet(x), user_dict['bets'])),
     )
