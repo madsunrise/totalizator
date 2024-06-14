@@ -20,8 +20,8 @@ class Database:
             raise ValueError(f'User with ID={user_id} does not exist')
         return result is not None
 
-    def check_if_event_exists(self, team_1: str, team_2: str, time: datetime, raise_error: bool = False) -> bool:
-        result = self.find_event(team_1=team_1, team_2=team_2, time=time)
+    def check_if_event_exists(self, uuid: str, raise_error: bool = False) -> bool:
+        result = self.get_event_by_uuid(uuid=uuid)
         if result is None and raise_error:
             raise ValueError(f'Event does not exist')
         return result is not None
@@ -82,6 +82,9 @@ class Database:
         return user_dict[key]
 
     def add_event(self, event: Event):
+        existing = self.find_event(team_1=event.team_1, team_2=event.team_2, time=event.time)
+        if existing is not None:
+            raise ValueError('Event already exists')
         event_dict = mapper.event_to_dict(event)
         self.event_collection.insert_one(event_dict)
 
@@ -91,6 +94,12 @@ class Database:
         result.sort(key=lambda x: x.time, reverse=False)
         return result
 
+    def get_event_by_uuid(self, uuid: str) -> Event | None:
+        event_dict = self.event_collection.find_one({'uuid': uuid})
+        if event_dict:
+            return mapper.parse_event(event_dict=dict(event_dict))
+        return None
+
     def find_event(self, team_1: str, team_2: str, time: datetime) -> Event | None:
         event_dict = self.event_collection.find_one({'team_1': team_1, 'team_2': team_2, 'time': time})
         if event_dict:
@@ -98,10 +107,10 @@ class Database:
         return None
 
     def update_event(self, event: Event):
-        self.check_if_event_exists(team_1=event.team_1, team_2=event.team_2, time=event.time, raise_error=True)
+        self.check_if_event_exists(uuid=event.uuid, raise_error=True)
         event_dict = mapper.event_to_dict(event)
         self.event_collection.update_one(
-            {'team_1': event.team_1, 'team_2': event.team_2, 'time': event.time},
+            {'uuid': event.uuid},
             {'$set': event_dict}
         )
 

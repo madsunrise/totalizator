@@ -9,6 +9,7 @@ import constants
 import credentials
 import datetime_utils
 import telegram_utils
+import utils
 from database import Database
 from models import Event, EventResult
 
@@ -49,6 +50,7 @@ def add_event(message):
     )
 
     event = Event(
+        uuid=utils.generate_uuid(),
         team_1=team_1,
         team_2=team_2,
         time=event_datetime_utc,
