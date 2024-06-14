@@ -16,6 +16,7 @@ COPY . .
 RUN pip3 install -r requirements.txt
 ENTRYPOINT python3 ./main.py
 
-# сборка: docker build -t totalizator:v1 .
+# сборка: docker buildx build --platform linux/amd64 -t totalizator:v1 .
 # сохранение: docker save -o totalizator_v1.tar totalizator:v1
 # выгрузка: docker load -i totalizator_v1.tar
+# запуск docker run --name totalizator --network=host -d --restart unless-stopped totalizator:v1
