@@ -111,7 +111,7 @@ def set_result_for_event(message):
                 f'({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores})')
     msg_text += '\n\n'
     msg_text += get_leaderboard_text()
-    bot.send_message(chat_id=constants.TARGET_CHAT_ID, text=msg_text)
+    bot.send_message(chat_id=get_target_chat_id(), text=msg_text)
 
 
 @bot.message_handler(commands=['events'])
@@ -288,14 +288,14 @@ def get_text_messages(message):
                          text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
         send_coming_events(user=user, chat_id=message.chat.id)
         msg_for_everybody = f'{user.full_name} сделал прогноз на матч {event.team_1} – {event.team_2}'
-        bot.send_message(chat_id=constants.TARGET_CHAT_ID, text=msg_for_everybody)
+        bot.send_message(chat_id=get_target_chat_id(), text=msg_for_everybody)
     except:
         bot.send_message(chat_id=message.chat.id, text=wrong_format_msg)
         return
 
 
 def is_club_member(user: User) -> bool:
-    return telegram_utils.is_chat_member(bot=bot, chat_id=constants.TARGET_CHAT_ID, user_id=user.id)
+    return telegram_utils.is_chat_member(bot=bot, chat_id=get_target_chat_id(), user_id=user.id)
 
 
 def is_maintainer(user: User) -> bool:
