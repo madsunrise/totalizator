@@ -4,7 +4,7 @@ import os
 import threading
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import pytz
 import schedule
@@ -444,11 +444,33 @@ def run_scheduler():
 
 def do_every_hour():
     bot.send_message(chat_id=get_maintainer_id(), text='Scheduler is running')
+    events_in_3_4_hours = find_events_in_next_hours(from_hour=3, to_hour=4)
+    if len(events_in_3_4_hours) > 0:
+        text = 'В ближайшие 3-4 часа: \n\n'
+        for event in events_in_3_4_hours:
+            text += f'{event.team_1} – {event.team_2}'
+            text += '\n'
+        bot.send_message(chat_id=get_maintainer_id(), text=text)
+    events_in_1_2_hours = find_events_in_next_hours(from_hour=1, to_hour=2)
+    if len(events_in_3_4_hours) > 0:
+        text = 'В ближайшие 1-2 часа: \n\n'
+        for event in events_in_1_2_hours:
+            text += f'{event.team_1} – {event.team_2}'
+            text += '\n'
+        bot.send_message(chat_id=get_maintainer_id(), text=text)
 
 
-# Set up a thread for the scheduler
 scheduler_thread = threading.Thread(target=run_scheduler)
 scheduler_thread.start()
+
+
+def find_events_in_next_hours(from_hour: int, to_hour: int) -> list:
+    now_utc = datetime.now(timezone.utc)
+    return database.find_events_in_time_range(
+        from_inclusive=now_utc + timedelta(hours=from_hour),
+        to_exclusive=now_utc + timedelta(hours=to_hour)
+    )
+
 
 if __name__ == '__main__':
     bot.infinity_polling()

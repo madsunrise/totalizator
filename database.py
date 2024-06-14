@@ -133,6 +133,17 @@ class Database:
             return mapper.parse_event(event_dict=dict(event_dict))
         return None
 
+    def find_events_in_time_range(self, from_inclusive: datetime, to_exclusive: datetime) -> list:
+        result = list(self.event_collection.find({
+            'time': {
+                "$gte": from_inclusive,
+                "$lt": to_exclusive
+            }
+        }))
+        result = list(map(lambda x: mapper.parse_event(x), result))
+        result.sort(key=lambda x: x.time, reverse=False)
+        return result
+
     def update_event(self, event: Event):
         self.check_if_event_exists(uuid=event.uuid, raise_error=True)
         event_dict = mapper.event_to_dict(event)
