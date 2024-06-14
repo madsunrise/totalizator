@@ -1,3 +1,4 @@
+import locale
 from datetime import datetime
 
 import pytz
@@ -9,7 +10,9 @@ import credentials
 import datetime_utils
 import telegram_utils
 from database import Database
+from models import Event
 
+locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
 bot = telebot.TeleBot(credentials.TELEGRAM_TOKEN)
 database = Database()
 
@@ -24,7 +27,8 @@ def start(message):
     pass
 
 
-# Формат сообщение: "Германия;Шотландия;14.06.2024 22:00"
+# Service method
+# Формат сообщения: "Германия;Шотландия;14.06.2024 22:00"
 @bot.message_handler(commands=['add_event'])
 def add_event(message):
     user = message.from_user
@@ -35,7 +39,7 @@ def add_event(message):
     team_1 = split[0]
     team_2 = split[1]
 
-    date_format = "%d.%m.%Y %H:%M"
+    date_format = '%d.%m.%Y %H:%M'
     datetime_obj = datetime.strptime(split[2], date_format)
 
     event_datetime_utc = datetime_utils.with_zone_same_instant(
@@ -43,11 +47,13 @@ def add_event(message):
         timezone_from=pytz.timezone('Europe/Moscow'),
         timezone_to=pytz.utc
     )
-    database.add_event(
+
+    event = Event(
         team_1=team_1,
         team_2=team_2,
-        time=event_datetime_utc
+        time=event_datetime_utc,
     )
+    database.add_event(event)
     bot.send_message(chat_id=message.chat.id, text='Матч добавлен')
 
 
@@ -64,16 +70,49 @@ def get_all_events(message):
     text = ''
     for event in events:
         moscow_time = datetime_utils.with_zone_same_instant(
+            datetime_obj=event.time,
+            timezone_from=pytz.utc,
+            timezone_to=pytz.timezone('Europe/Moscow'),
+        )
+        text += f"{event.team_1} - {event.team_2}, {datetime_utils.to_display_string(moscow_time)}"
+        event_result = event.result
+        if event_result:
+            text += f' ({event_result.team_1_scores} : {event_result.team_2_scores})'
+        text += '\n'
+    bot.send_message(chat_id=message.chat.id, text=text.strip())
+
+
+@bot.message_handler(commands=['coming_events'])
+def get_coming_events(message):
+    user = message.from_user
+    if not is_club_member(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    events = database.get_all_events()
+    result_events = []
+    for event in events:
+        event_time = event.time
+        if event_time <= datetime.now(event_time.tzinfo):
+            continue
+        result_events.append(event)
+        if len(result_events) >= 4:
+            break
+
+    if len(result_events) == 0:
+        bot.send_message(chat_id=message.chat.id, text="Матчей не обнаружено")
+        return
+
+    text = ''
+    for event in result_events:
+        moscow_time = datetime_utils.with_zone_same_instant(
             datetime_obj=event['time'],
             timezone_from=pytz.utc,
             timezone_to=pytz.timezone('Europe/Moscow'),
         )
-        text += f"{event['team_1']} - {event['team_2']}, {moscow_time}"
-        final_score = event['final_score']
-        if final_score:
-            text += f' ({final_score})'
+        text += f"{event.team_1} - {event.team_2}, {datetime_utils.to_display_string(moscow_time)}"
         text += '\n'
-    bot.send_message(chat_id=message.chat.id, text=text)
+
+    bot.send_message(chat_id=message.chat.id, text=text.strip())
 
 
 @bot.callback_query_handler(func=lambda call: True)

@@ -3,6 +3,9 @@ from typing import Any
 
 from pymongo import MongoClient
 
+import mapper
+from models import Event
+
 
 class Database:
     def __init__(self):
@@ -72,17 +75,15 @@ class Database:
             return None
         return user_dict[key]
 
-    def add_event(self, team_1: str, team_2: str, time: datetime):
-        event = {
-            'team_1': team_1,
-            'team_2': team_2,
-            'time': time,
-            'final_score': ''
-        }
-        self.events_collection.insert_one(event)
+    def add_event(self, event: Event):
+        event_dict = mapper.event_to_dict(event)
+        self.events_collection.insert_one(event_dict)
 
     def get_all_events(self) -> list:
-        return list(self.events_collection.find())
+        result = list(self.events_collection.find())
+        result = list(map(lambda x: mapper.parse_event(x), result))
+        result.sort(key=lambda x: x.time, reverse=False)
+        return result
 
     def set_user_attribute(self, user_id: int, key: str, value: Any):
         self.check_if_user_exists(user_id=user_id, raise_error=True)
