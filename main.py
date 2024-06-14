@@ -161,21 +161,27 @@ def get_coming_events(message):
         return
     save_user_or_update_interaction(user=user)
     all_bets = database.get_all_user_bets(user_id=user.id)
-    if len(all_bets) == 0:
-        msg = 'Пока ничего нет. Начни с команды /coming_events.'
-        bot.send_message(chat_id=message.chat.id, text=msg)
-        return
-    text = ''
+    bets_with_events = []
     for bet in all_bets:
         event = database.get_event_by_uuid(uuid=bet.event_uuid)
         if event is None:
             continue
+        bets_with_events.append((bet, event))
+
+    if len(bets_with_events) == 0:
+        msg = 'Пока ничего нет. Начни с команды /coming_events.'
+        bot.send_message(chat_id=message.chat.id, text=msg)
+        return
+    bets_with_events.sort(key=lambda x: x[1].time, reverse=False)
+    text = ''
+    for (bet, event) in bets_with_events:
         moscow_time = datetime_utils.with_zone_same_instant(
             datetime_obj=event.time,
             timezone_from=pytz.utc,
             timezone_to=pytz.timezone('Europe/Moscow'),
         )
-        text += f'{event.team_1} - {event.team_2} ({moscow_time.strftime('%d %b')}): {bet.team_1_scores}:{bet.team_2_scores}'
+        text += (f'{event.team_1} - {event.team_2} ({moscow_time.strftime('%d %b')}): '
+                 f'{bet.team_1_scores}:{bet.team_2_scores}')
         text += '\n\n'
     bot.send_message(chat_id=message.chat.id, text=text)
 
