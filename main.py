@@ -69,35 +69,30 @@ def add_event(message):
 
 
 # Service method
-# Формат сообщения: "Германия; Шотландия; 14.06.2024 22:00; 2:1"
+# Формат сообщения: "916dbd19-7d2c-46b6-a96a-0f726a22ec9c 2:1"
 @bot.message_handler(commands=['set_result'])
 def set_result_for_event(message):
     user = message.from_user
     if not is_maintainer(user=user):
         return
     save_user_or_update_interaction(user=user)
-    split = list(map(lambda x: x.strip(), message.text.removeprefix('/set_result').strip().split(';')))
-    team_1 = split[0]
-    team_2 = split[1]
+    split = list(map(lambda x: x.strip(), message.text.removeprefix('/set_result').strip().split(' ')))
+    if len(split) != 2:
+        bot.send_message(chat_id=message.chat.id, text='Неверный формат сообщения')
+        return
 
-    date_format = '%d.%m.%Y %H:%M'
-    datetime_obj = datetime.strptime(split[2], date_format)
-    event_datetime_utc = datetime_utils.with_zone_same_instant(
-        datetime_obj=datetime_obj,
-        timezone_from=pytz.timezone('Europe/Moscow'),
-        timezone_to=pytz.utc
-    )
+    event_uuid = split[0]
+    result_scores = split[1]
+    team_1_scores = int(result_scores.split(':')[0])
+    team_2_scores = int(result_scores.split(':')[1])
 
-    team_1_scores = int(split[3].split(':')[0])
-    team_2_scores = int(split[3].split(':')[1])
-
-    existing_event = database.find_event(team_1=team_1, team_2=team_2, time=event_datetime_utc)
+    existing_event = database.get_event_by_uuid(uuid=event_uuid)
     if not existing_event:
-        bot.send_message(chat_id=message.chat.id, text='Такой матч не найден :/')
+        bot.send_message(chat_id=message.chat.id, text=f'Матч с UUID = {event_uuid} не найден :/')
         return
 
     if existing_event.result:
-        msg = f'У матча уже есть результат ({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores})'
+        msg = f'У матча уже записан результат ({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores})'
         bot.send_message(chat_id=message.chat.id, text=msg)
         return
 
@@ -134,6 +129,7 @@ def get_all_events(message):
         event_result = event.result
         if event_result:
             text += f' ({event_result.team_1_scores} : {event_result.team_2_scores})'
+        text += f'\nUUID: {event.uuid}'
         text += '\n\n'
     bot.send_message(chat_id=message.chat.id, text=text.strip())
 
