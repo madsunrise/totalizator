@@ -141,7 +141,7 @@ def get_coming_events(message):
     if not is_club_member(user=user):
         return
     if message.chat.type != 'private':
-        bot.send_message(chat_id=message.chat.id, text='В личку, ёпта!')
+        bot.send_message(chat_id=message.chat.id, text='В личку, в личку пишем!')
         return
     save_user_or_update_interaction(user=user)
     send_coming_events(user=user, chat_id=message.chat.id)
@@ -153,7 +153,7 @@ def clear_current_event(message):
     if not is_club_member(user=user):
         return
     if message.chat.type != 'private':
-        bot.send_message(chat_id=message.chat.id, text='В личку, ёпта!')
+        bot.send_message(chat_id=message.chat.id, text='В личку, в личку пишем!')
         return
     save_user_or_update_interaction(user=user)
     database.clear_current_event_for_user(user_id=user.id)
@@ -166,7 +166,7 @@ def get_coming_events(message):
     if not is_club_member(user=user):
         return
     if message.chat.type != 'private':
-        bot.send_message(chat_id=message.chat.id, text='В личку, ёпта!')
+        bot.send_message(chat_id=message.chat.id, text='В личку, в личку пишем!')
         return
     save_user_or_update_interaction(user=user)
     all_bets = database.get_all_user_bets(user_id=user.id)
