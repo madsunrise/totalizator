@@ -15,3 +15,7 @@ WORKDIR /app
 COPY . .
 RUN pip3 install -r requirements.txt
 ENTRYPOINT python3 ./main.py
+
+# сборка: docker build -t totalizator:v1 .
+# сохранение: docker save -o totalizator_v1.tar totalizator:v1
+# выгрузка: docker load -i totalizator_v1.tar
