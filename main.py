@@ -1,5 +1,6 @@
 import locale
 import logging
+import os
 import traceback
 from datetime import datetime, timezone
 
@@ -9,7 +10,6 @@ from telebot.types import User, InlineKeyboardMarkup, InlineKeyboardButton
 
 import callback_data_utils
 import constants
-import credentials
 import datetime_utils
 import telegram_utils
 import utils
@@ -17,7 +17,7 @@ from database import Database
 from models import Event, EventResult, Bet
 
 locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
-bot = telebot.TeleBot(credentials.TELEGRAM_TOKEN)
+bot = telebot.TeleBot(os.environ[constants.ENV_BOT_TOKEN])
 database = Database()
 logging.basicConfig(filename='totalizator.log', encoding='utf-8', level=logging.INFO)
 
@@ -299,7 +299,7 @@ def is_club_member(user: User) -> bool:
 
 
 def is_maintainer(user: User) -> bool:
-    return user.id == credentials.MAINTAINER_ID
+    return user.id == get_maintainer_id()
 
 
 def save_user_or_update_interaction(user: User):
@@ -312,7 +312,7 @@ def save_user_or_update_interaction(user: User):
     if not inserted_new:
         database.update_last_interaction(user_id=user.id)
     else:
-        bot.send_message(chat_id=credentials.MAINTAINER_ID, text=f'New user: {user.full_name} ({user.username})')
+        bot.send_message(chat_id=get_maintainer_id(), text=f'New user: {user.full_name} ({user.username})')
 
 
 def handle_exception(e: Exception, user: User, chat_id: int):
@@ -320,7 +320,7 @@ def handle_exception(e: Exception, user: User, chat_id: int):
     bot.send_message(chat_id=chat_id, text='Что-то пошло не так, произошла ошибка :(')
     from_user = f'{user.full_name} (f{user.username}). '
     error_message = 'Произошла ошибка. ' + ''.join(traceback.TracebackException.from_exception(e).format())
-    bot.send_message(chat_id=credentials.MAINTAINER_ID, text=from_user + error_message)
+    bot.send_message(chat_id=get_maintainer_id(), text=from_user + error_message)
 
 
 def send_coming_events(user: User, chat_id: int):
@@ -421,6 +421,13 @@ def get_leaderboard_text() -> str:
         text += '\n'
     return text.strip()
 
+
+def get_target_chat_id() -> int:
+    return int(os.environ[constants.ENV_TARGET_CHAT_ID])
+
+
+def get_maintainer_id() -> int:
+    return int(os.environ[constants.ENV_MAINTAINER_ID])
 
 if __name__ == '__main__':
     bot.infinity_polling()
