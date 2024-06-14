@@ -1,10 +1,13 @@
 import locale
 import logging
 import os
+import threading
+import time
 import traceback
 from datetime import datetime, timezone
 
 import pytz
+import schedule
 import telebot
 from telebot.types import User, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -430,6 +433,22 @@ def get_target_chat_id() -> int:
 
 def get_maintainer_id() -> int:
     return int(os.environ[constants.ENV_MAINTAINER_ID])
+
+
+def run_scheduler():
+    schedule.every().hour.do(do_every_hour())
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+
+def do_every_hour():
+    bot.send_message(chat_id=get_maintainer_id(), text='Scheduler is running')
+
+
+# Set up a thread for the scheduler
+scheduler_thread = threading.Thread(target=run_scheduler)
+scheduler_thread.start()
 
 if __name__ == '__main__':
     bot.infinity_polling()
