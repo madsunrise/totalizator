@@ -53,6 +53,11 @@ def add_event(message):
         timezone_to=pytz.utc
     )
 
+    existing_event = database.find_event(team_1=team_1, team_2=team_2, time=event_datetime_utc)
+    if existing_event is not None:
+        bot.send_message(chat_id=message.chat.id, text='Такой матч уже существует!')
+        return
+
     event = Event(
         uuid=utils.generate_uuid(),
         team_1=team_1,
