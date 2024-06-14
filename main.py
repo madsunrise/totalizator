@@ -238,6 +238,8 @@ def get_text_messages(message):
     user = message.from_user
     if not is_club_member(user=user):
         return
+    if message.chat.type != 'private':
+        return
     save_user_or_update_interaction(user=user)
     current_event = database.get_current_event_for_user(user_id=user.id)
     if not current_event:
