@@ -140,7 +140,7 @@ def get_all_events(message):
             text += f' ({event_result.team_1_scores}:{event_result.team_2_scores})'
         text += f'\nUUID: {event.uuid}'
         text += '\n\n'
-    bot.send_message(chat_id=message.chat.id, text=text.strip())
+    telegram_utils.safe_send_message(bot=bot, user_id=message.chat.id, text=text.strip())
 
 
 @bot.message_handler(commands=['coming_events'])
@@ -190,7 +190,36 @@ def get_coming_events(message):
         bot.send_message(chat_id=message.chat.id, text=msg)
         return
     bets_with_events.sort(key=lambda x: x[1].time, reverse=False)
+
+    bets_played = list(filter(lambda x: x[1].result is not None, bets_with_events))
+    bets_awaiting = list(filter(lambda x: x[1].result is None, bets_with_events))
+
     text = ''
+    if len(bets_played) > 0:
+        text += 'Разыгранные:\n\n'
+        for (bet, event) in bets_played:
+            moscow_time = datetime_utils.with_zone_same_instant(
+                datetime_obj=event.time,
+                timezone_from=pytz.utc,
+                timezone_to=pytz.timezone('Europe/Moscow'),
+            )
+            text += (f'{event.team_1} – {event.team_2} ({moscow_time.strftime('%d %b')}): '
+                     f'{event.result.team_1_scores}:{event.result.team_2_scores} '
+                     f'(прогноз {bet.team_1_scores}:{bet.team_2_scores})')
+            text += '\n\n'
+
+    if len(bets_awaiting) > 0:
+        text += '\nОжидающие:\n\n'
+        for (bet, event) in bets_awaiting:
+            moscow_time = datetime_utils.with_zone_same_instant(
+                datetime_obj=event.time,
+                timezone_from=pytz.utc,
+                timezone_to=pytz.timezone('Europe/Moscow'),
+            )
+            text += (f'{event.team_1} – {event.team_2} ({moscow_time.strftime('%d %b')}): '
+                     f'{bet.team_1_scores}:{bet.team_2_scores}')
+            text += '\n\n'
+
     for (bet, event) in bets_with_events:
         moscow_time = datetime_utils.with_zone_same_instant(
             datetime_obj=event.time,
@@ -200,7 +229,7 @@ def get_coming_events(message):
         text += (f'{event.team_1} – {event.team_2} ({moscow_time.strftime('%d %b')}): '
                  f'{bet.team_1_scores}:{bet.team_2_scores}')
         text += '\n\n'
-    bot.send_message(chat_id=message.chat.id, text=text)
+    telegram_utils.safe_send_message(bot=bot, user_id=message.chat.id, text=text.strip())
 
 
 @bot.message_handler(commands=['leaderboard'])

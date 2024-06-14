@@ -1,6 +1,8 @@
 from telebot import TeleBot
 from telebot.apihelper import ApiTelegramException
 
+import constants
+
 
 def is_chat_member(bot: TeleBot, chat_id: int, user_id: int) -> bool:
     try:
@@ -8,3 +10,14 @@ def is_chat_member(bot: TeleBot, chat_id: int, user_id: int) -> bool:
         return status == 'creator' or status == 'member' or status == 'administrator'
     except ApiTelegramException as e:
         return False
+
+
+def safe_send_message(bot: TeleBot, user_id: int, text: str):
+    if len(text) > constants.TELEGRAM_MAX_MESSAGE_SIZE:
+        messages = []
+        for x in range(0, len(text), constants.TELEGRAM_MAX_MESSAGE_SIZE):
+            message_text = text[x:x + constants.TELEGRAM_MAX_MESSAGE_SIZE]
+            messages.append(bot.send_message(user_id, message_text))
+        return messages
+    else:
+        return bot.send_message(user_id, text)
