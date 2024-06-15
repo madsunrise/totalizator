@@ -444,33 +444,11 @@ def run_scheduler():
 
 def do_every_hour():
     send_morning_message_if_required()
-    bot.send_message(chat_id=get_maintainer_id(), text='Scheduler is running')
-    events_in_3_4_hours = find_events_in_next_hours(from_hour=3, to_hour=4)
-    if len(events_in_3_4_hours) > 0:
-        text = 'В ближайшие 3-4 часа: \n\n'
-        for event in events_in_3_4_hours:
-            text += f'{event.team_1} – {event.team_2}'
-            text += '\n'
-        bot.send_message(chat_id=get_maintainer_id(), text=text)
-    events_in_1_2_hours = find_events_in_next_hours(from_hour=1, to_hour=2)
-    if len(events_in_1_2_hours) > 0:
-        text = 'В ближайшие 1-2 часа: \n\n'
-        for event in events_in_1_2_hours:
-            text += f'{event.team_1} – {event.team_2}'
-            text += '\n'
-        bot.send_message(chat_id=get_maintainer_id(), text=text)
+    check_coming_soon_events()
 
 
 scheduler_thread = threading.Thread(target=run_scheduler)
 scheduler_thread.start()
-
-
-def find_events_in_next_hours(from_hour: int, to_hour: int) -> list:
-    now_utc = datetime.now(timezone.utc)
-    return database.find_events_in_time_range(
-        from_inclusive=now_utc + timedelta(hours=from_hour),
-        to_exclusive=now_utc + timedelta(hours=to_hour)
-    )
 
 
 def send_morning_message_if_required():
@@ -487,6 +465,40 @@ def send_morning_message_if_required():
         text += f'{event.team_1} – {event.team_2} в {match_time}'
         text += '\n'
     bot.send_message(chat_id=get_target_chat_id(), text=text)
+
+
+def check_coming_soon_events():
+    now_utc = datetime_utils.get_utc_time()
+    events_in_1_2_hours = database.find_events_in_time_range(
+        from_inclusive=now_utc + timedelta(hours=1),
+        to_exclusive=now_utc + timedelta(hours=2)
+    )
+    if len(events_in_1_2_hours) == 0:
+        return
+    text = 'В ближайшие 1-2 часа: \n\n'
+    for event in events_in_1_2_hours:
+        text += f'{event.team_1} – {event.team_2}'
+        text += '\n'
+    bot.send_message(chat_id=get_maintainer_id(), text=text)
+    for event in events_in_1_2_hours:
+        send_event_will_start_soon_warning(event)
+
+
+def send_event_will_start_soon_warning(event: Event):
+    all_users = database.get_all_users()
+    without_bets = list(filter(lambda x: database.find_bet(user_id=x.id, event_uuid=event.uuid) is None, all_users))
+    if len(without_bets) == 0:
+        return
+    match_time = event.get_time_in_moscow_zone().strftime('%H:%M')
+    text = f'❗️Матч {event.team_1} – {event.team_2} начнётся в {match_time}, но не все сделали прогноз:'
+    text += '\n'
+    for user in without_bets:
+        if user.username:
+            text += f'@{user.username}'
+        else:
+            text += user.first_name
+        text += '\n'
+    bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
 
 
 if __name__ == '__main__':
