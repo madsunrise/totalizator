@@ -1,5 +1,9 @@
 from datetime import datetime
 
+import pytz
+
+import datetime_utils
+
 
 class EventResult:
     def __init__(self, team_1_scores: int, team_2_scores: int):
@@ -21,6 +25,13 @@ class Event:
         self.team_2 = team_2
         self.time = time
         self.result = result
+
+    def get_time_in_moscow_zone(self) -> datetime:
+        return datetime_utils.with_zone_same_instant(
+            datetime_obj=self.time,
+            timezone_from=pytz.utc,
+            timezone_to=pytz.timezone('Europe/Moscow'),
+        )
 
 
 class Bet:

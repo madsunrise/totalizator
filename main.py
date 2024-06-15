@@ -129,12 +129,7 @@ def get_all_events(message):
         return
     text = ''
     for event in events:
-        moscow_time = datetime_utils.with_zone_same_instant(
-            datetime_obj=event.time,
-            timezone_from=pytz.utc,
-            timezone_to=pytz.timezone('Europe/Moscow'),
-        )
-        text += f"{event.team_1} – {event.team_2}, {datetime_utils.to_display_string(moscow_time)}"
+        text += f"{event.team_1} – {event.team_2}, {datetime_utils.to_display_string(event.get_time_in_moscow_zone())}"
         event_result = event.result
         if event_result:
             text += f' ({event_result.team_1_scores}:{event_result.team_2_scores})'
@@ -198,12 +193,7 @@ def get_coming_events(message):
     if len(bets_played) > 0:
         text += 'Разыгранные:\n\n'
         for (bet, event) in bets_played:
-            moscow_time = datetime_utils.with_zone_same_instant(
-                datetime_obj=event.time,
-                timezone_from=pytz.utc,
-                timezone_to=pytz.timezone('Europe/Moscow'),
-            )
-            text += (f'{event.team_1} – {event.team_2} ({moscow_time.strftime('%d %b')}): '
+            text += (f'{event.team_1} – {event.team_2} ({event.get_time_in_moscow_zone().strftime('%d %b')}): '
                      f'{event.result.team_1_scores}:{event.result.team_2_scores} '
                      f'(прогноз {bet.team_1_scores}:{bet.team_2_scores})')
             text += '\n\n'
@@ -211,12 +201,7 @@ def get_coming_events(message):
     if len(bets_awaiting) > 0:
         text += '\nОжидающие:\n\n'
         for (bet, event) in bets_awaiting:
-            moscow_time = datetime_utils.with_zone_same_instant(
-                datetime_obj=event.time,
-                timezone_from=pytz.utc,
-                timezone_to=pytz.timezone('Europe/Moscow'),
-            )
-            text += (f'{event.team_1} – {event.team_2} ({moscow_time.strftime('%d %b')}): '
+            text += (f'{event.team_1} – {event.team_2} ({event.get_time_in_moscow_zone().strftime('%d %b')}): '
                      f'{bet.team_1_scores}:{bet.team_2_scores}')
             text += '\n\n'
 
@@ -369,12 +354,7 @@ def send_coming_events(user: User, chat_id: int):
     events_available_for_bet_with_index = []
     for event in coming_events:
         index += 1
-        moscow_time = datetime_utils.with_zone_same_instant(
-            datetime_obj=event.time,
-            timezone_from=pytz.utc,
-            timezone_to=pytz.timezone('Europe/Moscow'),
-        )
-        text += f'{index}. {event.team_1} – {event.team_2}, {datetime_utils.to_display_string(moscow_time)}'
+        text += f'{index}. {event.team_1} – {event.team_2}, {datetime_utils.to_display_string(event.get_time_in_moscow_zone())}'
         existing_bet = database.find_bet(user_id=user.id, event_uuid=event.uuid)
         if existing_bet is not None:
             text += f' (прогноз {existing_bet.team_1_scores}:{existing_bet.team_2_scores})'
