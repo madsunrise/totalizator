@@ -220,15 +220,6 @@ def get_coming_events(message):
                      f'{bet.team_1_scores}:{bet.team_2_scores}')
             text += '\n\n'
 
-    for (bet, event) in bets_with_events:
-        moscow_time = datetime_utils.with_zone_same_instant(
-            datetime_obj=event.time,
-            timezone_from=pytz.utc,
-            timezone_to=pytz.timezone('Europe/Moscow'),
-        )
-        text += (f'{event.team_1} – {event.team_2} ({moscow_time.strftime('%d %b')}): '
-                 f'{bet.team_1_scores}:{bet.team_2_scores}')
-        text += '\n\n'
     telegram_utils.safe_send_message(bot=bot, user_id=message.chat.id, text=text.strip())
 
 
