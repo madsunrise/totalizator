@@ -443,6 +443,7 @@ def run_scheduler():
 
 
 def do_every_hour():
+    send_morning_message_if_required()
     bot.send_message(chat_id=get_maintainer_id(), text='Scheduler is running')
     events_in_3_4_hours = find_events_in_next_hours(from_hour=3, to_hour=4)
     if len(events_in_3_4_hours) > 0:
@@ -452,7 +453,7 @@ def do_every_hour():
             text += '\n'
         bot.send_message(chat_id=get_maintainer_id(), text=text)
     events_in_1_2_hours = find_events_in_next_hours(from_hour=1, to_hour=2)
-    if len(events_in_3_4_hours) > 0:
+    if len(events_in_1_2_hours) > 0:
         text = 'В ближайшие 1-2 часа: \n\n'
         for event in events_in_1_2_hours:
             text += f'{event.team_1} – {event.team_2}'
@@ -470,6 +471,22 @@ def find_events_in_next_hours(from_hour: int, to_hour: int) -> list:
         from_inclusive=now_utc + timedelta(hours=from_hour),
         to_exclusive=now_utc + timedelta(hours=to_hour)
     )
+
+
+def send_morning_message_if_required():
+    if datetime_utils.get_moscow_time().hour != 10:
+        return
+    from_time = datetime_utils.get_utc_time()
+    to_time = from_time + timedelta(hours=24)
+    events_today = database.find_events_in_time_range(from_inclusive=from_time, to_exclusive=to_time)
+    if len(events_today) == 0:
+        return
+    text = 'Доброе утро! Сегодня у нас:\n\n'
+    for event in events_today:
+        match_time = event.get_time_in_moscow_zone().strftime('%H:%M')
+        text += f'{event.team_1} – {event.team_2} в {match_time}'
+        text += '\n'
+    bot.send_message(chat_id=get_target_chat_id(), text=text)
 
 
 if __name__ == '__main__':
