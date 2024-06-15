@@ -465,7 +465,7 @@ def get_maintainer_id() -> int:
 
 
 def run_scheduler():
-    schedule.every().hour.do(do_every_hour())
+    schedule.every().hour.do(do_every_hour)
     while True:
         schedule.run_pending()
         time.sleep(1)
