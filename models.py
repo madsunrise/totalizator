@@ -74,3 +74,9 @@ class UserModel:
         if self.last_name:
             return f'{self.first_name} {self.last_name}'
         return self.first_name
+
+
+class Guessers:
+    def __init__(self, guessed_total_score: list, guessed_only_winner: list):
+        self.guessed_total_score = guessed_total_score
+        self.guessed_only_winner = guessed_only_winner

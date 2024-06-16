@@ -17,7 +17,7 @@ import datetime_utils
 import telegram_utils
 import utils
 from database import Database
-from models import Event, EventResult, Bet
+from models import Event, EventResult, Bet, Guessers
 
 locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
 bot = telebot.TeleBot(os.environ[constants.ENV_BOT_TOKEN])
@@ -113,6 +113,35 @@ def set_result_for_event(message):
     msg_text = (f'Матч {existing_event.team_1} – {existing_event.team_2} завершился ' +
                 f'({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores})')
     msg_text += '\n\n'
+
+    guessers = get_users_guessed_event_result(eventUuid=existing_event.uuid, result=existing_event.result)
+    if len(guessers.guessed_total_score) == 0 and len(guessers.guessed_only_winner) == 0:
+        msg_text += 'Никто не угадал результат.'
+        msg_text += '\n'
+    else:
+        if len(guessers.guessed_total_score) == 1:
+            msg_text += f'{guessers.guessed_total_score[0].get_full_name()} угадал точный счёт!'
+            msg_text += '\n\n'
+        elif len(guessers.guessed_total_score) > 1:
+            msg_text += 'Угадали точный счёт:'
+            msg_text += '\n'
+            for user_model in guessers.guessed_total_score:
+                msg_text += user_model.get_full_name()
+                msg_text += '\n'
+            msg_text += '\n'
+
+        if len(guessers.guessed_only_winner) == 1:
+            msg_text += f'{guessers.guessed_only_winner[0].get_full_name()} угадал победителя.'
+            msg_text += '\n\n'
+        elif len(guessers.guessed_only_winner) > 1:
+            msg_text += 'Угадали победителя:'
+            msg_text += '\n'
+            for user_model in guessers.guessed_only_winner:
+                msg_text += user_model.get_full_name()
+                msg_text += '\n'
+            msg_text += '\n'
+
+    msg_text += '---\n'
     msg_text += get_leaderboard_text()
     bot.send_message(chat_id=get_target_chat_id(), text=msg_text)
 
@@ -505,6 +534,22 @@ def send_event_will_start_soon_warning(event: Event):
             text += user.first_name
         text += '\n'
     bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
+
+
+def get_users_guessed_event_result(eventUuid: str, result: EventResult) -> Guessers:
+    users = database.get_all_users()
+    guessed_total_score = []
+    guessed_only_winner = []
+    for user_model in users:
+        user_id = user_model.id
+        bet = database.find_bet(user_id=user_id, event_uuid=eventUuid)
+        if bet is None:
+            continue
+        if result.team_1_scores == bet.team_1_scores and result.team_2_scores == bet.team_2_scores:
+            guessed_total_score.append(user_model)
+        elif is_same_winner(result=result, bet=bet):
+            guessed_only_winner.append(user_model)
+    return Guessers(guessed_total_score=guessed_total_score, guessed_only_winner=guessed_only_winner)
 
 
 if __name__ == '__main__':
