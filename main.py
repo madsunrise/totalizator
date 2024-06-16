@@ -475,11 +475,6 @@ def check_coming_soon_events():
     )
     if len(events_in_1_2_hours) == 0:
         return
-    text = 'В ближайшие 1-2 часа: \n\n'
-    for event in events_in_1_2_hours:
-        text += f'{event.team_1} – {event.team_2}'
-        text += '\n'
-    bot.send_message(chat_id=get_maintainer_id(), text=text)
     for event in events_in_1_2_hours:
         send_event_will_start_soon_warning(event)
 
