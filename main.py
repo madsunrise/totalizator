@@ -452,7 +452,7 @@ scheduler_thread.start()
 
 
 def send_morning_message_if_required():
-    if datetime_utils.get_moscow_time().hour != 10:
+    if datetime_utils.get_moscow_time().hour != 9:
         return
     from_time = datetime_utils.get_utc_time()
     to_time = from_time + timedelta(hours=24)
