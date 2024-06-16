@@ -464,7 +464,18 @@ def send_morning_message_if_required():
         match_time = event.get_time_in_moscow_zone().strftime('%H:%M')
         text += f'{event.team_1} – {event.team_2} в {match_time}'
         text += '\n'
-    bot.send_message(chat_id=get_target_chat_id(), text=text)
+
+    from_time = to_time
+    to_time = from_time + timedelta(hours=24)
+    events_tomorrow = database.find_events_in_time_range(from_inclusive=from_time, to_exclusive=to_time)
+    if len(events_tomorrow) > 0:
+        text += '\n'
+        text += 'Завтра:\n\n'
+        for event in events_tomorrow:
+            match_time = event.get_time_in_moscow_zone().strftime('%H:%M')
+            text += f'{event.team_1} – {event.team_2} в {match_time}'
+            text += '\n'
+    bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
 
 
 def check_coming_soon_events():
