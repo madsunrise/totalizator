@@ -298,7 +298,7 @@ def get_text_messages(message):
         bot.send_message(chat_id=message.chat.id, text=wrong_format_msg)
         return
 
-    if is_event_already_started(event):
+    if event.is_started():
         msg = f'Матч уже начался, досвидули!'
         bot.send_message(chat_id=message.chat.id, text=msg)
         database.clear_current_event_for_user(user_id=user.id)
@@ -441,11 +441,6 @@ def is_same_winner(result: EventResult, bet: Bet) -> bool:
     return bet.team_1_scores == bet.team_2_scores
 
 
-def is_event_already_started(event: Event) -> bool:
-    event_time = event.time.replace(tzinfo=timezone.utc)
-    return event_time <= datetime.now(timezone.utc)
-
-
 def get_leaderboard_text() -> str:
     users = database.get_all_users()
     users.sort(key=lambda x: x.scores, reverse=True)
@@ -474,6 +469,7 @@ def run_scheduler():
 def do_every_hour():
     send_morning_message_if_required()
     check_coming_soon_events()
+    check_for_unfinished_events()
 
 
 scheduler_thread = threading.Thread(target=run_scheduler)
@@ -550,6 +546,25 @@ def get_users_guessed_event_result(eventUuid: str, result: EventResult) -> Guess
         elif is_same_winner(result=result, bet=bet):
             guessed_only_winner.append(user_model)
     return Guessers(guessed_total_score=guessed_total_score, guessed_only_winner=guessed_only_winner)
+
+
+def check_for_unfinished_events():
+    all_events = database.get_all_events()
+    unfinished = list(filter(lambda x: is_unfinished_event(x), all_events))
+    if len(unfinished) == 1:
+        event = unfinished[0]
+        msg = f'❗️Матч {event.team_1} – {event.team_2} требует завершения.'
+        bot.send_message(get_maintainer_id(), text=msg)
+    elif len(unfinished) > 1:
+        msg = f'❗{len(unfinished)} матча требуют завершения.'
+        bot.send_message(get_maintainer_id(), text=msg)
+
+
+def is_unfinished_event(event: Event) -> bool:
+    in_progress = event.is_started() and not event.is_finished()
+    if not in_progress:
+        return False
+    return event.get_time_in_utc() + timedelta(hours=2) < datetime_utils.get_utc_time()
 
 
 if __name__ == '__main__':

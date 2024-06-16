@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytz
 
@@ -26,12 +26,21 @@ class Event:
         self.time = time
         self.result = result
 
+    def get_time_in_utc(self) -> datetime:
+        return self.time.replace(tzinfo=timezone.utc)
+
     def get_time_in_moscow_zone(self) -> datetime:
         return datetime_utils.with_zone_same_instant(
             datetime_obj=self.time,
             timezone_from=pytz.utc,
             timezone_to=pytz.timezone('Europe/Moscow'),
         )
+
+    def is_started(self) -> bool:
+        return self.time.replace(tzinfo=timezone.utc) <= datetime.now(timezone.utc)
+
+    def is_finished(self) -> bool:
+        return self.result is not None
 
 
 class Bet:
