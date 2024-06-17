@@ -117,7 +117,7 @@ def set_result_for_event(message):
     guessers = get_users_guessed_event_result(eventUuid=existing_event.uuid, result=existing_event.result)
     if len(guessers.guessed_total_score) == 0 and len(guessers.guessed_only_winner) == 0:
         msg_text += 'Никто не угадал результат.'
-        msg_text += '\n'
+        msg_text += '\n\n'
     else:
         if len(guessers.guessed_total_score) == 1:
             msg_text += f'{guessers.guessed_total_score[0].get_full_name()} угадал точный счёт!'
