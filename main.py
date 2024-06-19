@@ -157,12 +157,16 @@ def get_all_events(message):
         bot.send_message(chat_id=message.chat.id, text='Матчей не обнаружено')
         return
     text = ''
-    for event in events:
-        text += f"{event.team_1} – {event.team_2}, {datetime_utils.to_display_string(event.get_time_in_moscow_zone())}"
+    for idx, event in enumerate(events):
         event_result = event.result
-        if event_result:
+        if idx > 0 and event_result is not None and events[idx - 1].result is None:
+            text += '-----'
+            text += '\n\n'
+        text += f"{event.team_1} – {event.team_2}, {datetime_utils.to_display_string(event.get_time_in_moscow_zone())}"
+        if event_result is not None:
             text += f' ({event_result.team_1_scores}:{event_result.team_2_scores})'
-        text += f'\nUUID: {event.uuid}'
+        text += '\n'
+        text += event.uuid
         text += '\n\n'
     telegram_utils.safe_send_message(bot=bot, user_id=message.chat.id, text=text.strip())
 
