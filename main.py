@@ -159,7 +159,7 @@ def get_all_events(message):
     text = ''
     for idx, event in enumerate(events):
         event_result = event.result
-        if idx > 0 and event_result is not None and events[idx - 1].result is None:
+        if idx > 0 and event_result is None and events[idx - 1].result is not None:
             text += '-----'
             text += '\n\n'
         text += f"{event.team_1} – {event.team_2}, {datetime_utils.to_display_string(event.get_time_in_moscow_zone())}"
