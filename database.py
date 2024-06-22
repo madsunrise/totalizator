@@ -1,8 +1,10 @@
+import os
 from datetime import datetime
 from typing import Any
 
 from pymongo import MongoClient
 
+import constants
 import mapper
 from models import Event, Bet
 
@@ -10,7 +12,7 @@ from models import Event, Bet
 class Database:
     def __init__(self):
         self.client = MongoClient('localhost', 27017)
-        self.db = self.client['totalizator']
+        self.db = self.client[os.environ[constants.ENV_DATABASE_NAME]]
         self.user_collection = self.db['users']
         self.event_collection = self.db['events']
 
