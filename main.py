@@ -14,6 +14,7 @@ from telebot.types import User, InlineKeyboardMarkup, InlineKeyboardButton
 import callback_data_utils
 import constants
 import datetime_utils
+import strings
 import telegram_utils
 import utils
 from database import Database
@@ -31,7 +32,7 @@ def start(message):
     if not is_club_member(user=user):
         return
     save_user_or_update_interaction(user=user)
-    bot.send_message(chat_id=message.chat.id, text='Доступ к боту предоставлен. Начни с команды /coming_events.')
+    bot.send_message(chat_id=message.chat.id, text=strings.START_MESSAGE)
     pass
 
 
@@ -58,7 +59,7 @@ def add_event(message):
 
     existing_event = database.find_event(team_1=team_1, team_2=team_2, time=event_datetime_utc)
     if existing_event is not None:
-        bot.send_message(chat_id=message.chat.id, text='Такой матч уже существует!')
+        bot.send_message(chat_id=message.chat.id, text=strings.EVENT_ALREADY_EXIST_ERROR)
         return
 
     event = Event(
@@ -68,7 +69,7 @@ def add_event(message):
         time=event_datetime_utc,
     )
     database.add_event(event)
-    bot.send_message(chat_id=message.chat.id, text='Матч добавлен')
+    bot.send_message(chat_id=message.chat.id, text=strings.EVENT_HAS_BEEN_ADDED)
 
 
 # Service method
@@ -81,7 +82,7 @@ def set_result_for_event(message):
     save_user_or_update_interaction(user=user)
     split = list(map(lambda x: x.strip(), message.text.removeprefix('/set_result').strip().split(' ')))
     if len(split) != 2:
-        bot.send_message(chat_id=message.chat.id, text='Неверный формат сообщения')
+        bot.send_message(chat_id=message.chat.id, text=strings.WRONG_MESSAGE_FORMAT_ERROR)
         return
 
     event_uuid = split[0]
@@ -177,7 +178,7 @@ def get_coming_events(message):
     if not is_club_member(user=user):
         return
     if message.chat.type != 'private':
-        bot.send_message(chat_id=message.chat.id, text='В личку, в личку пишем!')
+        bot.send_message(chat_id=message.chat.id, text=strings.WRITE_TO_PRIVATE_MESSAGES)
         return
     save_user_or_update_interaction(user=user)
     send_coming_events(user=user, chat_id=message.chat.id)
@@ -189,7 +190,7 @@ def clear_current_event(message):
     if not is_club_member(user=user):
         return
     if message.chat.type != 'private':
-        bot.send_message(chat_id=message.chat.id, text='В личку, в личку пишем!')
+        bot.send_message(chat_id=message.chat.id, text=strings.WRITE_TO_PRIVATE_MESSAGES)
         return
     save_user_or_update_interaction(user=user)
     database.clear_current_event_for_user(user_id=user.id)
@@ -202,7 +203,7 @@ def get_coming_events(message):
     if not is_club_member(user=user):
         return
     if message.chat.type != 'private':
-        bot.send_message(chat_id=message.chat.id, text='В личку, в личку пишем!')
+        bot.send_message(chat_id=message.chat.id, text=strings.WRITE_TO_PRIVATE_MESSAGES)
         return
     save_user_or_update_interaction(user=user)
     all_bets = database.get_all_user_bets(user_id=user.id)
@@ -303,8 +304,7 @@ def get_text_messages(message):
         return
 
     if event.is_started():
-        msg = f'Матч уже начался, досвидули!'
-        bot.send_message(chat_id=message.chat.id, text=msg)
+        bot.send_message(chat_id=message.chat.id, text=strings.EVENT_HAS_ALREADY_STARTER_YOU_ARE_LATE)
         database.clear_current_event_for_user(user_id=user.id)
         return
 

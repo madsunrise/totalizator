@@ -1,0 +1,6 @@
+START_MESSAGE = 'Доступ к боту предоставлен. Начни с команды /coming_events.'
+WRITE_TO_PRIVATE_MESSAGES = 'Напиши мне в личные сообщения.'
+EVENT_ALREADY_EXIST_ERROR = 'Такой матч уже существует!'
+EVENT_HAS_BEEN_ADDED = 'Матч добавлен'
+WRONG_MESSAGE_FORMAT_ERROR = 'Неверный формат сообщения'
+EVENT_HAS_ALREADY_STARTER_YOU_ARE_LATE = 'Матч уже начался, ты опоздал :('
