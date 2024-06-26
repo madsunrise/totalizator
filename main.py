@@ -428,13 +428,25 @@ def calculate_scores_after_finished_event(event: Event):
                 team_2_scores=0,
                 created_at=datetime.now(timezone.utc)
             )
+
         scores_earned = 0
-        if result.team_1_scores == bet.team_1_scores and result.team_2_scores == bet.team_2_scores:
+        if is_exact_score(result=result, bet=bet):
+            scores_earned = 3
+        elif is_same_goal_difference(result=result, bet=bet):
             scores_earned = 2
         elif is_same_winner(result=result, bet=bet):
             scores_earned = 1
+
         if scores_earned > 0:
             database.add_scores_to_user(user_id=user_id, amount=scores_earned)
+
+
+def is_exact_score(result: EventResult, bet: Bet) -> bool:
+    return result.team_1_scores == bet.team_1_scores and result.team_2_scores == bet.team_2_scores
+
+
+def is_same_goal_difference(result: EventResult, bet: Bet) -> bool:
+    return result.team_1_scores - result.team_2_scores == bet.team_1_scores - bet.team_2_scores
 
 
 def is_same_winner(result: EventResult, bet: Bet) -> bool:
