@@ -111,7 +111,7 @@ def set_result_for_event(message):
         text=f'OK, {existing_event.team_1} – {existing_event.team_2} ' +
              f'{existing_event.result.team_1_scores}:{existing_event.result.team_2_scores}'
     )
-    msg_text = (f'Матч {existing_event.team_1} – {existing_event.team_2} завершился ' +
+    msg_text = (f'Основное время матча {existing_event.team_1} – {existing_event.team_2} завершилось ' +
                 f'({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores})')
     msg_text += '\n\n'
 
