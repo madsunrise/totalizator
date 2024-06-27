@@ -23,14 +23,17 @@ def parse_event(event_dict: dict) -> Event:
     result_dict = event_dict['result']
     result_obj = None
     if result_dict:
+        team_1_has_gone_through = None
+        if 'team_1_has_gone_through' in result_dict:
+            team_1_has_gone_through = result_dict['team_1_has_gone_through']
         result_obj = EventResult(
             team_1_scores=result_dict['team_1'],
             team_2_scores=result_dict['team_2'],
-            team_1_has_gone_through=result_dict['team_1_has_gone_through']
+            team_1_has_gone_through=team_1_has_gone_through
         )
-    is_playoff = event_dict['is_playoff']
-    if is_playoff is None:
-        is_playoff = False
+    is_playoff = False
+    if 'is_playoff' in event_dict:
+        is_playoff = event_dict['is_playoff']
     return Event(
         uuid=event_dict['uuid'],
         team_1=event_dict['team_1'],
@@ -53,12 +56,15 @@ def bet_to_dict(bet: Bet) -> dict:
 
 
 def parse_bet(bet_dict: dict) -> Bet:
+    team_1_will_go_through = None
+    if 'team_1_will_go_through' in bet_dict:
+        team_1_will_go_through = bet_dict['team_1_will_go_through']
     return Bet(
         user_id=bet_dict['user_id'],
         event_uuid=bet_dict['event_uuid'],
         team_1_scores=bet_dict['team_1_scores'],
         team_2_scores=bet_dict['team_2_scores'],
-        team_1_will_go_through=bet_dict['team_1_will_go_through'],
+        team_1_will_go_through=team_1_will_go_through,
         created_at=bet_dict['created_at'],
     )
 
