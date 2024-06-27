@@ -6,9 +6,14 @@ import datetime_utils
 
 
 class EventResult:
-    def __init__(self, team_1_scores: int, team_2_scores: int):
+    def __init__(self, team_1_scores: int, team_2_scores: int, team_1_has_gone_through: bool | None):
         self.team_1_scores = team_1_scores
         self.team_2_scores = team_2_scores
+        self.team_1_has_gone_through = team_1_has_gone_through  # указываем None только для группового этапа,
+        # так как там никто дальше не проходит. Для плей-офф здесь всегда будет True или False.
+
+    def is_draw(self) -> bool:
+        return self.team_1_scores == self.team_2_scores
 
 
 class Event:
@@ -59,8 +64,13 @@ class Bet:
         self.event_uuid = event_uuid
         self.team_1_scores = team_1_scores
         self.team_2_scores = team_2_scores
-        self.team_1_will_go_through = team_1_will_go_through
+        self.team_1_will_go_through = team_1_will_go_through  # указываем None только для группового этапа,
+        # так как там никто дальше не проходит. Для плей-офф здесь всегда будет True или False. Только если
+        # юзер не поставит на ничью и проигнорирует кнопку с тем, кто пройдёт дальше (тогда будет None).
         self.created_at = created_at
+
+    def is_bet_on_draw(self) -> bool:
+        return self.team_1_scores == self.team_2_scores
 
 
 class UserModel:
@@ -90,6 +100,17 @@ class UserModel:
 
 
 class Guessers:
-    def __init__(self, guessed_total_score: list, guessed_only_winner: list):
+    def __init__(self, guessed_total_score: list,
+                 guessed_goal_difference: list,
+                 guessed_only_winner: list,
+                 guessed_who_has_gone_through: list):
         self.guessed_total_score = guessed_total_score
+        self.guessed_goal_difference = guessed_goal_difference
         self.guessed_only_winner = guessed_only_winner
+        self.guessed_who_has_gone_through = guessed_who_has_gone_through
+
+    def is_everything_empty(self) -> bool:
+        return (len(self.guessed_total_score) == 0 and
+                len(self.guessed_goal_difference) == 0 and
+                len(self.guessed_only_winner) == 0 and
+                len(self.guessed_who_has_gone_through) == 0)

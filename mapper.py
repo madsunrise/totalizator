@@ -6,7 +6,8 @@ def event_to_dict(event: Event) -> dict:
     if event.result is not None:
         result_dict = {
             'team_1': event.result.team_1_scores,
-            'team_2': event.result.team_2_scores
+            'team_2': event.result.team_2_scores,
+            'team_1_has_gone_through': event.result.team_1_has_gone_through,
         }
     return {
         'uuid': event.uuid,
@@ -22,7 +23,11 @@ def parse_event(event_dict: dict) -> Event:
     result_dict = event_dict['result']
     result_obj = None
     if result_dict:
-        result_obj = EventResult(team_1_scores=result_dict['team_1'], team_2_scores=result_dict['team_2'])
+        result_obj = EventResult(
+            team_1_scores=result_dict['team_1'],
+            team_2_scores=result_dict['team_2'],
+            team_1_has_gone_through=result_dict['team_1_has_gone_through']
+        )
     is_playoff = event_dict['is_playoff']
     if is_playoff is None:
         is_playoff = False
