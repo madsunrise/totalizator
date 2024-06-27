@@ -52,12 +52,14 @@ class Bet:
                  event_uuid: str,
                  team_1_scores: int,
                  team_2_scores: int,
+                 team_1_will_go_through: bool | None,
                  created_at: datetime,
                  ):
         self.user_id = user_id
         self.event_uuid = event_uuid
         self.team_1_scores = team_1_scores
         self.team_2_scores = team_2_scores
+        self.team_1_will_go_through = team_1_will_go_through
         self.created_at = created_at
 
 

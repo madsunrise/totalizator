@@ -275,6 +275,44 @@ def callback_query(call):
                    f'Формат сообщения: \"X:X\" (например, \"1:0\").')
             bot.send_message(chat_id=chat_id, text=msg)
 
+        elif callback_data_utils.is_team_1_will_go_through_callback_data(call.data):
+            event_uuid = callback_data_utils.extract_uuid_from_team_1_will_go_through_callback_data(call.data)
+            event = database.get_event_by_uuid(uuid=event_uuid)
+            if event is None:
+                bot.send_message(chat_id=chat_id, text='Матч не найден :/')
+                return
+            bet = database.find_bet(user_id=user.id, event_uuid=event.uuid)
+            if bet is None:
+                bot.send_message(chat_id=chat_id, text='Что-то пошло не так :/')
+                return
+            bet.team_1_will_go_through = True
+            database.update_bet(user_id=user.id, bet=bet)
+            msg = f'OK, {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}, проход: {event.team_1}.'
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=msg
+            )
+        elif callback_data_utils.is_team_2_will_go_through_callback_data(call.data):
+            event_uuid = callback_data_utils.extract_uuid_from_team_2_will_go_through_callback_data(call.data)
+            event = database.get_event_by_uuid(uuid=event_uuid)
+            if event is None:
+                bot.send_message(chat_id=chat_id, text='Матч не найден :/')
+                return
+            bet = database.find_bet(user_id=user.id, event_uuid=event.uuid)
+            if bet is None:
+                bot.send_message(chat_id=chat_id, text='Что-то пошло не так :/')
+                return
+            bet.team_1_will_go_through = False
+            database.update_bet(user_id=user.id, bet=bet)
+            msg = f'OK, {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}, проход: {event.team_2}.'
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=msg
+            )
+
+
     except Exception as e:
         handle_exception(e=e, user=user, chat_id=chat_id)
 
@@ -327,13 +365,32 @@ def get_text_messages(message):
             event_uuid=event.uuid,
             team_1_scores=team_1_scores,
             team_2_scores=team_2_scores,
+            team_1_will_go_through=None,
             created_at=datetime.now(timezone.utc)
         )
         database.add_bet(user_id=user.id, bet=bet)
         database.clear_current_event_for_user(user_id=user.id)
-        bot.send_message(chat_id=message.chat.id,
-                         text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
-        send_coming_events(user=user, chat_id=message.chat.id)
+        # В случае ничьи нужно также поставить на проход одной из команд (но только для плей-офф).
+        if event.is_playoff and team_1_scores == team_2_scores:
+            buttons_list = []
+            callback_data_1 = callback_data_utils.create_team_1_will_go_through_callback_data(event)
+            button_1 = InlineKeyboardButton(event.team_1, callback_data=callback_data_1)
+            buttons_list.append(button_1)
+            callback_data_2 = callback_data_utils.create_team_2_will_go_through_callback_data(event)
+            button_2 = InlineKeyboardButton(event.team_2, callback_data=callback_data_2)
+            buttons_list.append(button_2)
+            markup = InlineKeyboardMarkup()
+            markup.row(*buttons_list)
+            bot.send_message(
+                chat_id=message.chat.id,
+                text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}. '
+                     f'Кто пройдёт дальше?',
+                reply_markup=markup
+            )
+        else:
+            bot.send_message(chat_id=message.chat.id,
+                             text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
+            send_coming_events(user=user, chat_id=message.chat.id)
         msg_for_everybody = f'{user.full_name} сделал прогноз на матч {event.team_1} – {event.team_2}'
         bot.send_message(chat_id=get_target_chat_id(), text=msg_for_everybody)
     except:
@@ -430,6 +487,7 @@ def calculate_scores_after_finished_event(event: Event):
                 event_uuid=event.uuid,
                 team_1_scores=0,
                 team_2_scores=0,
+                team_1_will_go_through=True,
                 created_at=datetime.now(timezone.utc)
             )
 

@@ -86,6 +86,19 @@ class Database:
         current_bets.append(bet_dict)
         self.set_user_attribute(user_id=user_id, key='bets', value=current_bets)
 
+    def update_bet(self, user_id: int, bet: Bet):
+        self.check_if_user_exists(user_id=user_id, raise_error=True)
+        existing_bet = self.find_bet(user_id=user_id, event_uuid=bet.event_uuid)
+        if existing_bet is None:
+            raise ValueError('Unable to update bet as it does not exist')
+        new_bet_dict = mapper.bet_to_dict(bet)
+        current_bets = self.get_user_attribute(user_id=user_id, key='bets')
+        for i, bet in enumerate(current_bets):
+            if bet['event_uuid'] == new_bet_dict['event_uuid']:
+                current_bets[i] = new_bet_dict
+                break
+        self.set_user_attribute(user_id=user_id, key='bets', value=current_bets)
+
     def get_all_user_bets(self, user_id: int) -> list:
         self.check_if_user_exists(user_id=user_id, raise_error=True)
         result = self.get_user_attribute(user_id=user_id, key='bets')

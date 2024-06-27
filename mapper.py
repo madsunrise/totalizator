@@ -42,6 +42,7 @@ def bet_to_dict(bet: Bet) -> dict:
         'event_uuid': bet.event_uuid,
         'team_1_scores': bet.team_1_scores,
         'team_2_scores': bet.team_2_scores,
+        'team_1_will_go_through': bet.team_1_will_go_through,
         'created_at': bet.created_at,
     }
 
@@ -52,6 +53,7 @@ def parse_bet(bet_dict: dict) -> Bet:
         event_uuid=bet_dict['event_uuid'],
         team_1_scores=bet_dict['team_1_scores'],
         team_2_scores=bet_dict['team_2_scores'],
+        team_1_will_go_through=bet_dict['team_1_will_go_through'],
         created_at=bet_dict['created_at'],
     )
 
