@@ -13,6 +13,7 @@ def event_to_dict(event: Event) -> dict:
         'team_1': event.team_1,
         'team_2': event.team_2,
         'time': event.time,
+        'is_playoff': event.is_playoff,
         'result': result_dict
     }
 
@@ -22,11 +23,15 @@ def parse_event(event_dict: dict) -> Event:
     result_obj = None
     if result_dict:
         result_obj = EventResult(team_1_scores=result_dict['team_1'], team_2_scores=result_dict['team_2'])
+    is_playoff = event_dict['is_playoff']
+    if is_playoff is None:
+        is_playoff = False
     return Event(
         uuid=event_dict['uuid'],
         team_1=event_dict['team_1'],
         team_2=event_dict['team_2'],
         time=event_dict['time'],
+        is_playoff=is_playoff,
         result=result_obj
     )
 

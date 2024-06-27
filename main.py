@@ -37,7 +37,8 @@ def start(message):
 
 
 # Service method
-# Формат сообщения: "Германия; Шотландия; 14.06.2024 22:00"
+# Формат сообщения для группы: "Германия; Шотландия; 14.06.2024 22:00"
+# Формат сообщения для плей-офф: "Германия; Шотландия; 14.06.2024 22:00; playoff"
 @bot.message_handler(commands=['add_event'])
 def add_event(message):
     user = message.from_user
@@ -50,6 +51,8 @@ def add_event(message):
 
     date_format = '%d.%m.%Y %H:%M'
     datetime_obj = datetime.strptime(split[2], date_format)
+
+    is_playoff = len(split) >= 4 and split[3] == 'playoff'
 
     event_datetime_utc = datetime_utils.with_zone_same_instant(
         datetime_obj=datetime_obj,
@@ -67,6 +70,7 @@ def add_event(message):
         team_1=team_1,
         team_2=team_2,
         time=event_datetime_utc,
+        is_playoff=is_playoff,
     )
     database.add_event(event)
     bot.send_message(chat_id=message.chat.id, text=strings.EVENT_HAS_BEEN_ADDED)
