@@ -86,7 +86,7 @@ def add_event(message):
     database.add_event(event)
     msg = strings.EVENT_HAS_BEEN_ADDED
     msg += '\n'
-    msg += f"{event.team_1} – {event.team_2}, {datetime_utils.to_display_string(event.get_time_in_moscow_zone())}"
+    msg += f"{event.team_1} – {event.team_2}, {datetime_utils.to_display_string(datetime_obj)}"
     bot.send_message(chat_id=message.chat.id, text=msg)
 
 
