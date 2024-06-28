@@ -537,7 +537,13 @@ def send_coming_events(user_id: int, chat_id: int):
         text += f'{index}. {event.team_1} – {event.team_2}, {datetime_utils.to_display_string(event.get_time_in_moscow_zone())}'
         existing_bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
         if existing_bet is not None:
-            text += f' (прогноз {existing_bet.team_1_scores}:{existing_bet.team_2_scores})'
+            text += f' (прогноз {existing_bet.team_1_scores}:{existing_bet.team_2_scores}'
+            if existing_bet.team_1_will_go_through is not None and existing_bet.is_bet_on_draw():
+                if existing_bet.team_1_will_go_through:
+                    text += f', проход {event.team_1}'
+                else:
+                    text += f', проход {event.team_2}'
+            text += ')'
         else:
             events_available_for_bet_with_index.append((index, event))
         text += '\n\n'
