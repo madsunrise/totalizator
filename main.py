@@ -681,13 +681,13 @@ def get_maintainer_id() -> int:
 
 
 def run_scheduler():
-    schedule.every().hour.do(do_every_hour)
+    schedule.every(10).minute.do(do_every_ten_minutes)
     while True:
         schedule.run_pending()
         time.sleep(1)
 
 
-def do_every_hour():
+def do_every_ten_minutes():
     send_morning_message_if_required()
     check_coming_soon_events()
     check_for_unfinished_events()
@@ -698,7 +698,8 @@ scheduler_thread.start()
 
 
 def send_morning_message_if_required():
-    if datetime_utils.get_moscow_time().hour != 9:
+    moscow_time = datetime_utils.get_moscow_time()
+    if moscow_time.hour != 9 or moscow_time.minute not in range(10, 20):  # Отправляем в интервале 9:10 – 9:20
         return
     from_time = datetime_utils.get_utc_time()
     to_time = from_time + timedelta(hours=24)
@@ -726,23 +727,30 @@ def send_morning_message_if_required():
 
 def check_coming_soon_events():
     now_utc = datetime_utils.get_utc_time()
-    events_in_1_2_hours = database.find_events_in_time_range(
-        from_inclusive=now_utc + timedelta(hours=1),
-        to_exclusive=now_utc + timedelta(hours=2)
+    coming_soon_events = database.find_events_in_time_range(
+        from_inclusive=now_utc + timedelta(hours=1, minutes=40),
+        to_exclusive=now_utc + timedelta(hours=1, minutes=50)  # интервал должен быть 10 минут!
     )
-    if len(events_in_1_2_hours) == 0:
-        return
-    for event in events_in_1_2_hours:
-        send_event_will_start_soon_warning(event)
+    for event in coming_soon_events:
+        match_time = event.get_time_in_moscow_zone().strftime('%H:%M')
+        header = f'❗️Матч {event.team_1} – {event.team_2} начнётся в {match_time}, но не все сделали прогноз:'
+        send_event_will_start_soon_warning(event_uuid=event.uuid, header_text=header)
+
+    coming_very_soon_events = database.find_events_in_time_range(
+        from_inclusive=now_utc + timedelta(minutes=5),
+        to_exclusive=now_utc + timedelta(minutes=15)  # интервал должен быть 10 минут!
+    )
+    for event in coming_very_soon_events:
+        header = f'‼️LAST CALL ‼️'
+        send_event_will_start_soon_warning(event_uuid=event.uuid, header_text=header)
 
 
-def send_event_will_start_soon_warning(event: Event):
+def send_event_will_start_soon_warning(event_uuid: str, header_text: str):
     all_users = database.get_all_users()
-    without_bets = list(filter(lambda x: database.find_bet(user_id=x.id, event_uuid=event.uuid) is None, all_users))
+    without_bets = list(filter(lambda x: database.find_bet(user_id=x.id, event_uuid=event_uuid) is None, all_users))
     if len(without_bets) == 0:
         return
-    match_time = event.get_time_in_moscow_zone().strftime('%H:%M')
-    text = f'❗️Матч {event.team_1} – {event.team_2} начнётся в {match_time}, но не все сделали прогноз:'
+    text = header_text
     text += '\n'
     for user in without_bets:
         if user.username:
