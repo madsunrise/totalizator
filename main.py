@@ -619,33 +619,21 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
 
         scores_earned = 0
         if event.is_playoff:
-            # Если угадал точный счёт, то получаешь 3 очка и кайфуешь.
             if is_exact_score(result=result, bet=bet):
                 scores_earned = 3
                 guessed_total_score.append(user_model)
-            else:
-                if result.is_draw():
-                    # Если ничья, то получаешь 1 очко если угадал ничью. Разницу мячей здесь не учитываем.
-                    if is_same_winner(result=result, bet=bet):
-                        scores_earned = 1
-                        guessed_only_winner.append(user_model)
-                else:
-                    # Если не ничья, то проверяем сначала разницу мячей, а затем исход.
-                    if is_same_goal_difference(result=result, bet=bet):
-                        scores_earned = 2
-                        guessed_goal_difference.append(user_model)
-                    elif is_same_winner(result=result, bet=bet):
-                        scores_earned = 1
-                        guessed_only_winner.append(user_model)
+            elif is_same_goal_difference(result=result, bet=bet):
+                scores_earned = 2
+                guessed_goal_difference.append(user_model)
+            elif is_same_winner(result=result, bet=bet):
+                scores_earned = 1
+                guessed_only_winner.append(user_model)
 
-                # Также можно получить +1 очко за проход одной из команд.
-                # Получить можно только в следующих вариантах:
-                # 1) Ты поставил на ничью и проход, в итоге команда прошла дальше (неважно, в основное время или нет)
-                # 2) Ты поставил на победу одной из команд, и она прошла дальше, но не в основное время (т.е. исход ты не угадал)
-                if is_guessed_who_has_gone_through(result=result, bet=bet):
-                    if bet.is_bet_on_draw() or result.is_draw():
-                        scores_earned += 1
-                        guessed_who_has_gone_through.append(user_model)
+            # Также можно получить +1 очко за проход одной из команд.
+            # Независимо от первой ставки.
+            if is_guessed_who_has_gone_through(result=result, bet=bet):
+                scores_earned += 1
+                guessed_who_has_gone_through.append(user_model)
         else:
             # Алгоритм подсчёта для группового этапа
             if is_exact_score(result=result, bet=bet):
