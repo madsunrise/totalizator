@@ -290,16 +290,7 @@ def get_coming_events(message):
     bets_awaiting = list(filter(lambda x: x[1].result is None, bets_with_events))
 
     text = ''
-    if len(bets_played) > 0:
-        text += 'Разыгранные:\n\n'
-        for (bet, event) in bets_played:
-            text += (f'{event.team_1} – {event.team_2} ({event.get_time_in_moscow_zone().strftime('%d %b')}): '
-                     f'{event.result.team_1_scores}:{event.result.team_2_scores} '
-                     f'(прогноз {bet.team_1_scores}:{bet.team_2_scores})')
-            text += '\n\n'
-
     if len(bets_awaiting) > 0:
-        text += '\nОжидающие:\n\n'
         for (bet, event) in bets_awaiting:
             text += (f'{event.team_1} – {event.team_2} ({event.get_time_in_moscow_zone().strftime('%d %b')}): '
                      f'{bet.team_1_scores}:{bet.team_2_scores}')
@@ -309,8 +300,17 @@ def get_coming_events(message):
                 else:
                     text += f' (проход {event.team_2})'
             text += '\n\n'
+    else:
+        text += 'Пока ничего нет. Начни с команды /coming_events.'
 
-    telegram_utils.safe_send_message(bot=bot, user_id=message.chat.id, text=text.strip())
+    reply_markup = None
+    if len(bets_played) > 0:
+        callback_data = callback_data_utils.create_show_my_already_played_bets()
+        button = InlineKeyboardButton(text='Показать разыгранные', callback_data=callback_data)
+        reply_markup = InlineKeyboardMarkup()
+        reply_markup.add(button)
+
+    bot.send_message(chat_id=message.chat.id, text=text.strip(), reply_markup=reply_markup)
 
 
 @bot.message_handler(commands=['leaderboard'])
@@ -360,6 +360,35 @@ def callback_query(call):
                 event_uuid=event_uuid,
                 team_1_will_go_through=False
             )
+        elif callback_data_utils.is_show_my_already_played_bets(call.data):
+            all_bets = database.get_all_user_bets(user_id=user.id)
+            bets_with_events = []
+            for bet in all_bets:
+                event = database.get_event_by_uuid(uuid=bet.event_uuid)
+                if event is None:
+                    continue
+                bets_with_events.append((bet, event))
+
+            bets_with_events.sort(key=lambda x: x[1].time, reverse=False)
+            bets_played = list(filter(lambda x: x[1].result is not None, bets_with_events))
+            if len(bets_played) == 0:
+                msg = 'Внезапно, но здесь пусто.'
+                bot.send_message(chat_id=call.message.chat.id, text=msg)
+                return
+
+            text = 'Разыгранные:\n\n'
+            for (bet, event) in bets_played:
+                text += (f'{event.team_1} – {event.team_2} ({event.get_time_in_moscow_zone().strftime('%d %b')}): '
+                         f'{event.result.team_1_scores}:{event.result.team_2_scores} '
+                         f'(прогноз {bet.team_1_scores}:{bet.team_2_scores}')
+                if bet.team_1_will_go_through is not None and bet.is_bet_on_draw():
+                    if bet.team_1_will_go_through:
+                        text += f', проход {event.team_1}'
+                    else:
+                        text += f', проход {event.team_2}'
+                text += ')'
+                text += '\n\n'
+            bot.send_message(chat_id=call.message.chat.id, text=text.strip())
 
     except Exception as e:
         handle_exception(e=e, user=user, chat_id=chat_id)

@@ -37,6 +37,14 @@ def is_team_2_will_go_through_callback_data(callback_data: str) -> bool:
     return callback_data.startswith('team_2_will_go_through_')
 
 
+def is_show_my_already_played_bets(callback_data: str) -> bool:
+    return callback_data == 'show_my_already_played_bets'
+
+
+def create_show_my_already_played_bets() -> str:
+    return 'show_my_already_played_bets'
+
+
 def extract_uuid_from_team_2_will_go_through_callback_data(callback_data: str) -> str:
     if not is_team_2_will_go_through_callback_data(callback_data):
         raise ValueError('This is not team_2_will_go_through callback data')
