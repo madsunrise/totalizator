@@ -235,7 +235,7 @@ def get_all_events(message):
         text += '\n'
         text += event.uuid
         text += '\n\n'
-    telegram_utils.safe_send_message(bot=bot, user_id=message.chat.id, text=text.strip())
+    telegram_utils.safe_send_message(bot=bot, chat_id=message.chat.id, text=text.strip())
 
 
 @bot.message_handler(commands=['coming_events'])
@@ -388,7 +388,7 @@ def callback_query(call):
                         text += f', проход {event.team_2}'
                 text += ')'
                 text += '\n\n'
-            bot.send_message(chat_id=call.message.chat.id, text=text.strip())
+            telegram_utils.safe_send_message(bot=bot, chat_id=call.message.chat.id, text=text.strip())
 
     except Exception as e:
         handle_exception(e=e, user=user, chat_id=chat_id)

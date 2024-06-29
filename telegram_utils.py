@@ -12,12 +12,11 @@ def is_chat_member(bot: TeleBot, chat_id: int, user_id: int) -> bool:
         return False
 
 
-def safe_send_message(bot: TeleBot, user_id: int, text: str):
+def safe_send_message(bot: TeleBot, chat_id: int, text: str):
     if len(text) > constants.TELEGRAM_MAX_MESSAGE_SIZE:
         messages = []
         for x in range(0, len(text), constants.TELEGRAM_MAX_MESSAGE_SIZE):
             message_text = text[x:x + constants.TELEGRAM_MAX_MESSAGE_SIZE]
-            messages.append(bot.send_message(user_id, message_text))
-        return messages
+            messages.append(bot.send_message(chat_id=chat_id, text=message_text))
     else:
-        return bot.send_message(user_id, text)
+        bot.send_message(chat_id=chat_id, text=text)
