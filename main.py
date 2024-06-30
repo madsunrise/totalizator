@@ -322,6 +322,31 @@ def get_leaderboard(message):
     bot.send_message(chat_id=message.chat.id, text=get_leaderboard_text())
 
 
+# Удалить сделанный прогноз. Формат сообщения: "/delete_bet 65619a74-44b2-4f81-9557-713dec9bfe96".
+@bot.message_handler(commands=['delete_bet'])
+def delete_bet(message):
+    user = message.from_user
+    if not is_club_member(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    event_uuid = message.text.removeprefix('/delete_bet').strip()
+    if not event_uuid:
+        bot.send_message(chat_id=message.chat.id, text=strings.WRONG_MESSAGE_FORMAT_ERROR)
+        return
+
+    existing_event = database.get_event_by_uuid(uuid=event_uuid)
+    if existing_event is None:
+        bot.send_message(chat_id=message.chat.id, text=strings.EVENT_NOT_FOUND_ERROR)
+        return
+
+    existing_bet = database.find_bet(user_id=user.id, event_uuid=existing_event.uuid)
+    if existing_bet is None:
+        bot.send_message(chat_id=message.chat.id, text='Прогноз на этот матч не найден.')
+        return
+    database.delete_bet(user_id=user.id, event_uuid=existing_event.uuid)
+    bot.send_message(chat_id=message.chat.id, text=strings.OK)
+
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     user = call.from_user
@@ -334,7 +359,7 @@ def callback_query(call):
             event_uuid = callback_data_utils.extract_uuid_from_make_bet_callback_data(call.data)
             event = database.get_event_by_uuid(uuid=event_uuid)
             if event is None:
-                bot.send_message(chat_id=chat_id, text='Матч не найден :/')
+                bot.send_message(chat_id=chat_id, text=strings.EVENT_NOT_FOUND_ERROR)
                 return
             database.save_current_event_to_user(user_id=user.id, event_uuid=event.uuid)
             msg = (f'Укажи счёт, с которым завершится основное время матча '
@@ -398,7 +423,7 @@ def process_who_will_go_through_bet(user_id: int, chat_id: int, message_id: int,
                                     team_1_will_go_through: bool):
     event = database.get_event_by_uuid(uuid=event_uuid)
     if event is None:
-        bot.send_message(chat_id=chat_id, text='Матч не найден :/')
+        bot.send_message(chat_id=chat_id, text=strings.EVENT_NOT_FOUND_ERROR)
         return
     bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
     if bet is None:

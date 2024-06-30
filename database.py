@@ -99,6 +99,12 @@ class Database:
                 break
         self.set_user_attribute(user_id=user_id, key='bets', value=current_bets)
 
+    def delete_bet(self, user_id: int, event_uuid: str):
+        self.check_if_user_exists(user_id=user_id, raise_error=True)
+        current_bets = self.get_user_attribute(user_id=user_id, key='bets')
+        new_bets = [x for x in current_bets if x['event_uuid'] != event_uuid]
+        self.set_user_attribute(user_id=user_id, key='bets', value=new_bets)
+
     def get_all_user_bets(self, user_id: int) -> list:
         self.check_if_user_exists(user_id=user_id, raise_error=True)
         result = self.get_user_attribute(user_id=user_id, key='bets')
