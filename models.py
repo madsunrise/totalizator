@@ -49,6 +49,9 @@ class Event:
     def is_finished(self) -> bool:
         return self.result is not None
 
+    def is_in_progress(self) -> bool:
+        return self.is_started() and not self.is_finished()
+
 
 class Bet:
 

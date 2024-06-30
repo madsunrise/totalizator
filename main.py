@@ -780,21 +780,23 @@ def send_event_will_start_soon_warning(event_uuid: str, header_text: str):
 
 def check_for_unfinished_events():
     all_events = database.get_all_events()
-    unfinished = list(filter(lambda x: is_unfinished_event(x), all_events))
-    if len(unfinished) == 1:
-        event = unfinished[0]
+    events_on_progress = list(filter(lambda x: x.is_in_progress(), all_events))
+    result_events = list(filter(lambda x: is_event_requires_finish(x), events_on_progress))
+    if len(result_events) == 1:
+        event = result_events[0]
         msg = f'❗️Матч {event.team_1} – {event.team_2} требует завершения.'
         bot.send_message(get_maintainer_id(), text=msg)
-    elif len(unfinished) > 1:
-        msg = f'❗{len(unfinished)} матча требуют завершения.'
+    elif len(result_events) > 1:
+        msg = f'❗{len(result_events)} матча требуют завершения.'
         bot.send_message(get_maintainer_id(), text=msg)
 
 
-def is_unfinished_event(event: Event) -> bool:
-    in_progress = event.is_started() and not event.is_finished()
-    if not in_progress:
-        return False
-    return event.get_time_in_utc() + timedelta(hours=2) < datetime_utils.get_utc_time()
+def is_event_requires_finish(unfinished_event: Event) -> bool:
+    if unfinished_event.is_playoff:
+        delta_hours = 3
+    else:
+        delta_hours = 2
+    return unfinished_event.get_time_in_utc() + timedelta(hours=delta_hours) < datetime_utils.get_utc_time()
 
 
 if __name__ == '__main__':
