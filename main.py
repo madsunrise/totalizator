@@ -783,7 +783,7 @@ def check_coming_soon_events():
         to_exclusive=now_utc + timedelta(minutes=15)  # интервал должен быть 10 минут!
     )
     for event in coming_very_soon_events:
-        header = f'‼️LAST CALL ‼️'
+        header = f'‼️ LAST CALL ‼️'
         send_event_will_start_soon_warning(event_uuid=event.uuid, header_text=header)
 
 
