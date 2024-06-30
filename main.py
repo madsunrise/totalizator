@@ -201,6 +201,8 @@ def set_result_for_event(message):
             msg_text += '\n'
 
         if len(guessers.guessed_who_has_gone_through) > 0:
+            msg_text += '--'
+            msg_text += '\n'
             msg_text += '+1 очко за проход:'
             msg_text += '\n'
             for user_model in guessers.guessed_who_has_gone_through:
@@ -208,7 +210,7 @@ def set_result_for_event(message):
                 msg_text += '\n'
             msg_text += '\n'
 
-    msg_text += '---\n'
+    msg_text += '-----\n'
     msg_text += get_leaderboard_text()
     bot.send_message(chat_id=get_target_chat_id(), text=msg_text)
 
