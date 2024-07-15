@@ -1,3 +1,4 @@
+import csv
 import locale
 import logging
 import os
@@ -7,6 +8,7 @@ import traceback
 from datetime import datetime, timezone, timedelta
 
 import pytz
+import requests
 import schedule
 import telebot
 from telebot.types import User, InlineKeyboardMarkup, InlineKeyboardButton
@@ -238,6 +240,76 @@ def get_all_events(message):
         text += event.uuid
         text += '\n\n'
     telegram_utils.safe_send_message(bot=bot, chat_id=message.chat.id, text=text.strip())
+
+
+@bot.message_handler(commands=['export_statistic'])
+def export_statistic(message):
+    user = message.from_user
+    if not is_maintainer(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    with open('stat.csv', 'w', newline='') as file:
+        writer = csv.writer(file)
+        field = [
+            "Команда 1",
+            "Команда 2",
+            "Голы команды 1",
+            "Голы команды 2",
+            "Проход",
+            "Юзер",
+            "Ставка на команду 1",
+            "Ставка на команду 2",
+            "Ставка на проход"
+        ]
+
+        writer.writerow(field)
+        events = database.get_all_events()
+        users = database.get_all_users()
+        for event in events:
+            event_result = event.result
+            if event_result is None:
+                continue
+            for user in users:
+                bet = database.find_bet(user_id=user.id, event_uuid=event.uuid)
+                if bet is not None:
+                    go_through = None
+                    if event_result.team_1_has_gone_through is not None:
+                        if event_result.team_1_has_gone_through:
+                            go_through = event.team_1
+                        else:
+                            go_through = event.team_2
+                    bet_go_through = None
+                    if bet.team_1_will_go_through is not None:
+                        if bet.team_1_will_go_through:
+                            bet_go_through = event.team_1
+                        else:
+                            bet_go_through = event.team_2
+                    writer.writerow([
+                        event.team_1,
+                        event.team_2,
+                        event_result.team_1_scores,
+                        event_result.team_2_scores,
+                        go_through,
+                        user.username,
+                        bet.team_1_scores,
+                        bet.team_2_scores,
+                        bet_go_through
+                    ])
+
+    with open('stat.csv', 'rb') as file:
+        url = f'https://api.telegram.org/bot{os.environ[constants.ENV_BOT_TOKEN]}/sendDocument'
+        files = {
+            'document': file
+        }
+        payload = {
+            'chat_id': message.chat.id,
+        }
+        response = requests.post(url, data=payload, files=files)
+
+        if response.ok:
+            return response.json()['result']['document']['file_id']
+        logging.error(f"Failed to upload file to Telegram API: {response.status_code}")
+        raise Exception()
 
 
 @bot.message_handler(commands=['coming_events'])
