@@ -642,7 +642,7 @@ def handle_exception(e: Exception, user: User, chat_id: int):
 
 
 def send_coming_events(user_id: int, chat_id: int):
-    max_events_in_message = 5
+    max_events_in_message = 10
     events = database.get_all_events()
     coming_events = []
     for event in events:
