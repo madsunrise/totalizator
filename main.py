@@ -230,16 +230,16 @@ def get_all_events(message):
     text = ''
     for idx, event in enumerate(events):
         event_result = event.result
-        if idx > 0 and event_result is None and events[idx - 1].result is not None:
-            text += '-----'
-            text += '\n\n'
-        text += f"{event.team_1} – {event.team_2}, {datetime_utils.to_display_string(event.get_time_in_moscow_zone())}"
         if event_result is not None:
-            text += f' ({event_result.team_1_scores}:{event_result.team_2_scores})'
+            continue
+        text += f"{event.team_1} – {event.team_2}, {datetime_utils.to_display_string(event.get_time_in_moscow_zone())}"
         text += '\n'
         text += event.uuid
-        text += '\n\n'
-    telegram_utils.safe_send_message(bot=bot, chat_id=message.chat.id, text=text.strip())
+        text += ' \n\n'
+    text = text.strip()
+    if len(text) == 0:
+        text = 'Предстоящих событий не обнаружено'
+    telegram_utils.safe_send_message(bot=bot, chat_id=message.chat.id, text=text)
 
 
 @bot.message_handler(commands=['export_statistic'])
