@@ -20,7 +20,7 @@ import strings
 import telegram_utils
 import utils
 from database import Database
-from models import Event, EventResult, Bet, Guessers
+from models import Event, EventResult, Bet, Guessers, GuessedEvent
 
 locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
 bot = telebot.TeleBot(os.environ[constants.ENV_BOT_TOKEN])
@@ -716,34 +716,24 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
                 created_at=datetime.now(timezone.utc)
             )
 
+        guessed_result = calculate_if_user_guessed_result(result, bet, event.is_playoff)
         scores_earned = 0
-        if event.is_playoff:
-            if is_exact_score(result=result, bet=bet):
-                scores_earned = 3
-                guessed_total_score.append(user_model)
-            elif is_same_goal_difference(result=result, bet=bet):
-                scores_earned = 2
-                guessed_goal_difference.append(user_model)
-            elif is_same_winner(result=result, bet=bet):
-                scores_earned = 1
-                guessed_only_winner.append(user_model)
+        if guessed_result is not None:
+            scores_earned = convert_guessed_event_to_scores(guessed_result)
+            match guessed_result:
+                case GuessedEvent.WINNER:
+                    guessed_only_winner.append(user_model)
+                case GuessedEvent.GOAL_DIFFERENCE:
+                    guessed_goal_difference.append(user_model)
+                case GuessedEvent.EXACT_SCORE:
+                    guessed_total_score.append(user_model)
 
+        if event.is_playoff:
             # Также можно получить +1 очко за проход одной из команд.
             # Независимо от первой ставки.
             if is_guessed_who_has_gone_through(result=result, bet=bet):
                 scores_earned += 1
                 guessed_who_has_gone_through.append(user_model)
-        else:
-            # Алгоритм подсчёта для группового этапа
-            if is_exact_score(result=result, bet=bet):
-                scores_earned = 3
-                guessed_total_score.append(user_model)
-            elif is_same_goal_difference(result=result, bet=bet):
-                scores_earned = 2
-                guessed_goal_difference.append(user_model)
-            elif is_same_winner(result=result, bet=bet):
-                scores_earned = 1
-                guessed_only_winner.append(user_model)
 
         if scores_earned > 0:
             database.add_scores_to_user(user_id=user_id, amount=scores_earned)
@@ -754,6 +744,29 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
         guessed_only_winner=guessed_only_winner,
         guessed_who_has_gone_through=guessed_who_has_gone_through,
     )
+
+
+def convert_guessed_event_to_scores(guessed_event: GuessedEvent) -> int:
+    match guessed_event:
+        case GuessedEvent.WINNER:
+            return 1
+        case GuessedEvent.GOAL_DIFFERENCE:
+            return 2
+        case GuessedEvent.EXACT_SCORE:
+            return 3
+        case _:
+            raise ValueError(f'Unknown enum value: {guessed_event}')
+
+
+def calculate_if_user_guessed_result(event_result: EventResult, bet: Bet, is_playoff: bool) -> GuessedEvent | None:
+    if is_exact_score(result=event_result, bet=bet):
+        return GuessedEvent.EXACT_SCORE
+    elif is_same_goal_difference(result=event_result, bet=bet):
+        return GuessedEvent.GOAL_DIFFERENCE
+    elif is_same_winner(result=event_result, bet=bet):
+        return GuessedEvent.WINNER
+    else:
+        return None
 
 
 def is_exact_score(result: EventResult, bet: Bet) -> bool:

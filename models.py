@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from enum import Enum
 
 import pytz
 
@@ -117,3 +118,9 @@ class Guessers:
                 len(self.guessed_goal_difference) == 0 and
                 len(self.guessed_only_winner) == 0 and
                 len(self.guessed_who_has_gone_through) == 0)
+
+
+class GuessedEvent(Enum):
+    WINNER = 1
+    GOAL_DIFFERENCE = 2
+    EXACT_SCORE = 3
