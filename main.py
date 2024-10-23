@@ -889,7 +889,7 @@ def send_morning_message_with_yesterday_results():
 
 def is_now_good_time_for_morning_message() -> bool:
     moscow_time = datetime_utils.get_moscow_time()
-    return moscow_time.hour == 9 or moscow_time.minute in range(10, 20)  # Отправляем в интервале 9:10 – 9:20
+    return moscow_time.hour == 9 and moscow_time.minute in range(10, 20)  # Отправляем в интервале 9:10 – 9:20
 
 
 def check_coming_soon_events():
