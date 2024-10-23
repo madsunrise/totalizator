@@ -475,7 +475,7 @@ def callback_query(call):
                 bot.send_message(chat_id=call.message.chat.id, text=msg)
                 return
 
-            text = 'Разыгранные:\n\n'
+            text = ''
             for (bet, event) in bets_played:
                 text += (f'{event.team_1} – {event.team_2} ({event.get_time_in_moscow_zone().strftime('%d %b')}): '
                          f'{event.result.team_1_scores}:{event.result.team_2_scores} '
