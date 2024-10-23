@@ -707,16 +707,13 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
         bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
         if bet is None:
             logging.warning(f'User {user_model.username} has no bets on event, using default bet 0:0')
-            bet = Bet(
-                user_id=user_id,
-                event_uuid=event.uuid,
-                team_1_scores=0,
-                team_2_scores=0,
-                team_1_will_go_through=True,
-                created_at=datetime.now(timezone.utc)
-            )
+            bet = create_default_bet(user_id, event.uuid)
 
-        guessed_result = calculate_if_user_guessed_result(result, bet, event.is_playoff)
+        guessed_result = calculate_if_user_guessed_result(
+            event_result=result,
+            bet=bet,
+            is_playoff=event.is_playoff
+        )
         scores_earned = 0
         if guessed_result is not None:
             scores_earned = convert_guessed_event_to_scores(guessed_result)
@@ -817,7 +814,8 @@ def run_scheduler():
 
 
 def do_every_ten_minutes():
-    send_morning_message_if_required()
+    send_morning_message_with_games_today()
+    send_morning_message_with_yesterday_results()
     check_coming_soon_events()
     check_for_unfinished_events()
 
@@ -826,9 +824,8 @@ scheduler_thread = threading.Thread(target=run_scheduler)
 scheduler_thread.start()
 
 
-def send_morning_message_if_required():
-    moscow_time = datetime_utils.get_moscow_time()
-    if moscow_time.hour != 9 or moscow_time.minute not in range(10, 20):  # Отправляем в интервале 9:10 – 9:20
+def send_morning_message_with_games_today():
+    if not is_now_good_time_for_morning_message():
         return
     from_time = datetime_utils.get_utc_time()
     to_time = from_time + timedelta(hours=24)
@@ -852,6 +849,47 @@ def send_morning_message_if_required():
             text += f'{event.team_1} – {event.team_2} в {match_time}'
             text += '\n'
     bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
+
+
+def send_morning_message_with_yesterday_results():
+    if not is_now_good_time_for_morning_message():
+        return
+    to_time = datetime_utils.get_utc_time()
+    from_time = to_time - timedelta(hours=24)
+    events_for_last_24_hours = database.find_events_in_time_range(from_inclusive=from_time, to_exclusive=to_time)
+    if len(events_for_last_24_hours) == 0:
+        return
+    text = 'Результаты за вчера:\n\n'
+    for user_model in database.get_all_users():
+        user_id = user_model.id
+        scores_earned_total_by_user = 0
+        for event in events_for_last_24_hours:
+            bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
+            event_result = event.result
+            if bet is None:
+                bet = create_default_bet(user_id=user_id, event_uuid=event.uuid)
+            if event_result is None:
+                continue
+            guessed_event = calculate_if_user_guessed_result(
+                event_result=event_result,
+                bet=bet,
+                is_playoff=event.is_playoff
+            )
+            if guessed_event is not None:
+                scores_earned_total_by_user += convert_guessed_event_to_scores(guessed_event=guessed_event)
+            if event.is_playoff:
+                # Также можно получить +1 очко за проход одной из команд.
+                # Независимо от первой ставки.
+                if is_guessed_who_has_gone_through(result=event_result, bet=bet):
+                    scores_earned_total_by_user += 1
+        text += f'{user_model.get_full_name()}: +{scores_earned_total_by_user}'
+        text += '\n'
+    bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
+
+
+def is_now_good_time_for_morning_message() -> bool:
+    moscow_time = datetime_utils.get_moscow_time()
+    return moscow_time.hour == 9 or moscow_time.minute in range(10, 20)  # Отправляем в интервале 9:10 – 9:20
 
 
 def check_coming_soon_events():
@@ -909,6 +947,17 @@ def is_event_requires_finish(unfinished_event: Event) -> bool:
     else:
         delta_hours = 2
     return unfinished_event.get_time_in_utc() + timedelta(hours=delta_hours) < datetime_utils.get_utc_time()
+
+
+def create_default_bet(user_id: int, event_uuid: str) -> Bet:
+    return Bet(
+        user_id=user_id,
+        event_uuid=event_uuid,
+        team_1_scores=0,
+        team_2_scores=0,
+        team_1_will_go_through=True,
+        created_at=datetime.now(timezone.utc)
+    )
 
 
 if __name__ == '__main__':
