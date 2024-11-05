@@ -617,7 +617,7 @@ def is_club_member(user: User) -> bool:
 
 
 def is_maintainer(user: User) -> bool:
-    return user.id == get_maintainer_id()
+    return user.id in get_maintainer_ids()
 
 
 def save_user_or_update_interaction(user: User):
@@ -630,7 +630,8 @@ def save_user_or_update_interaction(user: User):
     if not inserted_new:
         database.update_last_interaction(user_id=user.id)
     else:
-        bot.send_message(chat_id=get_maintainer_id(), text=f'New user: {user.full_name} ({user.username})')
+        for user_id in get_maintainer_ids():
+            bot.send_message(chat_id=user_id, text=f'New user: {user.full_name} ({user.username})')
 
 
 def handle_exception(e: Exception, user: User, chat_id: int):
@@ -638,7 +639,8 @@ def handle_exception(e: Exception, user: User, chat_id: int):
     bot.send_message(chat_id=chat_id, text='Что-то пошло не так, произошла ошибка :(')
     from_user = f'{user.full_name} (f{user.username}). '
     error_message = 'Произошла ошибка. ' + ''.join(traceback.TracebackException.from_exception(e).format())
-    bot.send_message(chat_id=get_maintainer_id(), text=from_user + error_message)
+    for user_id in get_maintainer_ids():
+        bot.send_message(chat_id=user_id, text=from_user + error_message)
 
 
 def send_coming_events(user_id: int, chat_id: int):
@@ -802,8 +804,15 @@ def get_target_chat_id() -> int:
     return int(os.environ[constants.ENV_TARGET_CHAT_ID])
 
 
-def get_maintainer_id() -> int:
-    return int(os.environ[constants.ENV_MAINTAINER_ID])
+def is_maintainer(user: User) -> bool:
+    return user.id in get_maintainer_ids()
+
+
+def get_maintainer_ids() -> list:
+    value = os.environ[constants.ENV_MAINTAINER_IDS]
+    if not value:
+        return []
+    return list(map(lambda x: int(x), value.split(',')))
 
 
 def run_scheduler():
@@ -935,10 +944,12 @@ def check_for_unfinished_events():
     if len(result_events) == 1:
         event = result_events[0]
         msg = f'❗️Матч {event.team_1} – {event.team_2} требует завершения.'
-        bot.send_message(get_maintainer_id(), text=msg)
+        for user_id in get_maintainer_ids():
+            bot.send_message(user_id, text=msg)
     elif len(result_events) > 1:
         msg = f'❗{len(result_events)} матча требуют завершения.'
-        bot.send_message(get_maintainer_id(), text=msg)
+        for user_id in get_maintainer_ids():
+            bot.send_message(user_id, text=msg)
 
 
 def is_event_requires_finish(unfinished_event: Event) -> bool:
