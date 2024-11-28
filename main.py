@@ -396,6 +396,44 @@ def get_leaderboard(message):
     bot.send_message(chat_id=message.chat.id, text=get_leaderboard_text())
 
 
+@bot.message_handler(commands=['last_12_hours'])
+def send_message_with_results_for_last_12_hours():
+    hours = 12
+    to_time = datetime_utils.get_utc_time()
+    from_time = to_time - timedelta(hours=hours)
+    events_for_this_period = database.find_events_in_time_range(from_inclusive=from_time, to_exclusive=to_time)
+    if len(events_for_this_period) == 0:
+        text = f'За последние {hours} часов матчей не было.'
+        bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
+        return
+    text = f'Результаты за последние {hours} часов:\n\n'
+    for user_model in database.get_all_users():
+        user_id = user_model.id
+        scores_earned_total_by_user = 0
+        for event in events_for_this_period:
+            bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
+            event_result = event.result
+            if bet is None:
+                bet = create_default_bet(user_id=user_id, event_uuid=event.uuid)
+            if event_result is None:
+                continue
+            guessed_event = calculate_if_user_guessed_result(
+                event_result=event_result,
+                bet=bet,
+                is_playoff=event.is_playoff
+            )
+            if guessed_event is not None:
+                scores_earned_total_by_user += convert_guessed_event_to_scores(guessed_event=guessed_event)
+            if event.is_playoff:
+                # Также можно получить +1 очко за проход одной из команд.
+                # Независимо от первой ставки.
+                if is_guessed_who_has_gone_through(result=event_result, bet=bet):
+                    scores_earned_total_by_user += 1
+        text += f'{user_model.get_full_name()}: +{scores_earned_total_by_user}'
+        text += '\n'
+    bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
+
+
 # Удалить сделанный прогноз. Формат сообщения: "/delete_bet 65619a74-44b2-4f81-9557-713dec9bfe96".
 @bot.message_handler(commands=['delete_bet'])
 def delete_bet(message):
@@ -824,7 +862,6 @@ def run_scheduler():
 
 def do_every_ten_minutes():
     send_morning_message_with_games_today()
-    send_morning_message_with_yesterday_results()
     check_coming_soon_events()
     check_for_unfinished_events()
 
@@ -857,42 +894,6 @@ def send_morning_message_with_games_today():
             match_time = event.get_time_in_moscow_zone().strftime('%H:%M')
             text += f'{event.team_1} – {event.team_2} в {match_time}'
             text += '\n'
-    bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
-
-
-def send_morning_message_with_yesterday_results():
-    if not is_now_good_time_for_morning_message():
-        return
-    to_time = datetime_utils.get_utc_time()
-    from_time = to_time - timedelta(hours=24)
-    events_for_last_24_hours = database.find_events_in_time_range(from_inclusive=from_time, to_exclusive=to_time)
-    if len(events_for_last_24_hours) == 0:
-        return
-    text = 'Результаты за вчера:\n\n'
-    for user_model in database.get_all_users():
-        user_id = user_model.id
-        scores_earned_total_by_user = 0
-        for event in events_for_last_24_hours:
-            bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
-            event_result = event.result
-            if bet is None:
-                bet = create_default_bet(user_id=user_id, event_uuid=event.uuid)
-            if event_result is None:
-                continue
-            guessed_event = calculate_if_user_guessed_result(
-                event_result=event_result,
-                bet=bet,
-                is_playoff=event.is_playoff
-            )
-            if guessed_event is not None:
-                scores_earned_total_by_user += convert_guessed_event_to_scores(guessed_event=guessed_event)
-            if event.is_playoff:
-                # Также можно получить +1 очко за проход одной из команд.
-                # Независимо от первой ставки.
-                if is_guessed_who_has_gone_through(result=event_result, bet=bet):
-                    scores_earned_total_by_user += 1
-        text += f'{user_model.get_full_name()}: +{scores_earned_total_by_user}'
-        text += '\n'
     bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
 
 
