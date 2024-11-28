@@ -31,7 +31,7 @@ class Database:
     def get_all_users(self):
         result = list(self.user_collection.find())
         result = list(map(lambda x: mapper.parse_user(x), result))
-        result.sort(key=lambda x: x.username, reverse=False)
+        result.sort(key=lambda x: x.scores, reverse=True)
         return result
 
     def get_user(self, user_id: int):
