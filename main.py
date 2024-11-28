@@ -397,14 +397,17 @@ def get_leaderboard(message):
 
 
 @bot.message_handler(commands=['last_12_hours'])
-def send_message_with_results_for_last_12_hours():
+def send_message_with_results_for_last_12_hours(message):
+    user = message.from_user
+    if not is_club_member(user=user):
+        return
     hours = 12
     to_time = datetime_utils.get_utc_time()
     from_time = to_time - timedelta(hours=hours)
     events_for_this_period = database.find_events_in_time_range(from_inclusive=from_time, to_exclusive=to_time)
     if len(events_for_this_period) == 0:
         text = f'За последние {hours} часов матчей не было.'
-        bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
+        bot.send_message(chat_id=message.chat.id, text=text.strip())
         return
     text = f'Результаты за последние {hours} часов:\n\n'
     for user_model in database.get_all_users():
@@ -431,7 +434,7 @@ def send_message_with_results_for_last_12_hours():
                     scores_earned_total_by_user += 1
         text += f'{user_model.get_full_name()}: +{scores_earned_total_by_user}'
         text += '\n'
-    bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
+    bot.send_message(chat_id=message.chat.id, text=text.strip())
 
 
 # Удалить сделанный прогноз. Формат сообщения: "/delete_bet 65619a74-44b2-4f81-9557-713dec9bfe96".
