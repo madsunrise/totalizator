@@ -416,10 +416,10 @@ def send_message_with_results_for_last_12_hours(message):
         for event in events_for_this_period:
             bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
             event_result = event.result
-            if bet is None:
-                bet = create_default_bet(user_id=user_id, event_uuid=event.uuid)
             if event_result is None:
                 continue
+            if bet is None:
+                bet = create_default_bet(user_id=user_id, event_uuid=event.uuid, is_play_off=event.is_playoff)
             guessed_event = calculate_if_user_guessed_result(
                 event_result=event_result,
                 bet=bet,
@@ -750,7 +750,7 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
         bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
         if bet is None:
             logging.warning(f'User {user_model.username} has no bets on event, using default bet 0:0')
-            bet = create_default_bet(user_id, event.uuid)
+            bet = create_default_bet(user_id=user_id, event_uuid=event.uuid, is_play_off=event.is_playoff)
 
         guessed_result = calculate_if_user_guessed_result(
             event_result=result,
@@ -964,13 +964,18 @@ def is_event_requires_finish(unfinished_event: Event) -> bool:
     return unfinished_event.get_time_in_utc() + timedelta(hours=delta_hours) < datetime_utils.get_utc_time()
 
 
-def create_default_bet(user_id: int, event_uuid: str) -> Bet:
+def create_default_bet(user_id: int, event_uuid: str, is_play_off: bool) -> Bet:
+    if is_play_off:
+        team_1_will_go_through = True
+    else:
+        team_1_will_go_through = None
+
     return Bet(
         user_id=user_id,
         event_uuid=event_uuid,
         team_1_scores=0,
         team_2_scores=0,
-        team_1_will_go_through=True,
+        team_1_will_go_through=team_1_will_go_through,
         created_at=datetime.now(timezone.utc)
     )
 
