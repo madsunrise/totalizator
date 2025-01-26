@@ -119,7 +119,9 @@ def set_result_for_event(message):
         return
 
     if existing_event.result:
-        msg = f'У матча уже записан результат ({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores})'
+        scores_team_1 = existing_event.result.team_1_scores
+        scores_team_2 = existing_event.result.team_2_scores
+        msg = f'У матча уже записан результат ({scores_team_1}:{scores_team_2})'
         bot.send_message(chat_id=message.chat.id, text=msg)
         return
 
@@ -556,7 +558,7 @@ def process_who_will_go_through_bet(user_id: int, chat_id: int, message_id: int,
         message_id=message_id,
         text=msg
     )
-    send_coming_events(user_id=user_id, chat_id=chat_id)
+    send_coming_events(user_id=user_id, chat_id=chat_id, send_error_if_all_bets_already_make=False)
 
 
 @bot.message_handler(content_types=['text'])
@@ -645,7 +647,7 @@ def get_text_messages(message):
         else:
             bot.send_message(chat_id=message.chat.id,
                              text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
-            send_coming_events(user_id=user.id, chat_id=message.chat.id)
+            send_coming_events(user_id=user.id, chat_id=message.chat.id, send_error_if_all_bets_already_make=False)
         msg_for_everybody = f'{user.full_name} сделал прогноз на матч {event.team_1} – {event.team_2}'
         bot.send_message(chat_id=get_target_chat_id(), text=msg_for_everybody)
     except:
@@ -684,8 +686,7 @@ def handle_exception(e: Exception, user: User, chat_id: int):
         bot.send_message(chat_id=user_id, text=from_user + error_message)
 
 
-def send_coming_events(user_id: int, chat_id: int):
-    max_events_in_message = 10
+def send_coming_events(user_id: int, chat_id: int, send_error_if_all_bets_already_make: bool = True):
     events = database.get_all_events()
     coming_events = []
     for event in events:
@@ -693,8 +694,6 @@ def send_coming_events(user_id: int, chat_id: int):
         if event_time <= datetime.now(timezone.utc):
             continue
         coming_events.append(event)
-        if len(coming_events) >= max_events_in_message:
-            break
 
     if len(coming_events) == 0:
         bot.send_message(chat_id=chat_id, text="Матчей не обнаружено")
@@ -702,25 +701,23 @@ def send_coming_events(user_id: int, chat_id: int):
 
     text = ''
     index = 0
+    max_events_in_message = 10
     events_available_for_bet_with_index = []
     for event in coming_events:
-        index += 1
-        text += f'{index}. {event.team_1} – {event.team_2}, {datetime_utils.to_display_string(event.get_time_in_moscow_zone())}'
         existing_bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
         if existing_bet is not None:
-            text += f' (прогноз {existing_bet.team_1_scores}:{existing_bet.team_2_scores}'
-            if existing_bet.team_1_will_go_through is not None and existing_bet.is_bet_on_draw():
-                if existing_bet.team_1_will_go_through:
-                    text += f', проход {event.team_1}'
-                else:
-                    text += f', проход {event.team_2}'
-            text += ')'
-        else:
-            events_available_for_bet_with_index.append((index, event))
+            continue
+        index += 1
+        event_time = datetime_utils.to_display_string(event.get_time_in_moscow_zone())
+        text += f'{index}. {event.team_1} – {event.team_2}, {event_time}'
+        events_available_for_bet_with_index.append((index, event))
         text += '\n\n'
+        if len(events_available_for_bet_with_index) == max_events_in_message:
+            break
 
     if len(events_available_for_bet_with_index) == 0:
-        bot.send_message(chat_id=chat_id, text=text.strip())
+        if send_error_if_all_bets_already_make:
+            bot.send_message(chat_id=chat_id, text='На все предстоящие матчи прогноз уже сделан.')
         return
 
     text += '\nВыбери матч, на который хотел бы сделать прогноз.'
