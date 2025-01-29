@@ -96,13 +96,13 @@ def add_event(message):
 # Формат сообщения: "916dbd19-7d2c-46b6-a96a-0f726a22ec9c 2:1".
 # Если это плей-офф, и в основное время была ничья, то указываем сразу после счёта кто прошёл дальше:
 # "916dbd19-7d2c-46b6-a96a-0f726a22ec9c 1:1 Испания".
-@bot.message_handler(commands=['set_result'])
+@bot.message_handler(commands=['result'])
 def set_result_for_event(message):
     user = message.from_user
     if not is_maintainer(user=user):
         return
     save_user_or_update_interaction(user=user)
-    split = list(map(lambda x: x.strip(), message.text.removeprefix('/set_result').strip().split(' ')))
+    split = list(map(lambda x: x.strip(), message.text.removeprefix('/result').strip().split(' ')))
 
     if len(split) < 2:
         bot.send_message(chat_id=message.chat.id, text=strings.WRONG_MESSAGE_FORMAT_ERROR)
