@@ -830,9 +830,18 @@ def is_guessed_who_has_gone_through(result: EventResult, bet: Bet) -> bool:
 def get_leaderboard_text() -> str:
     users = database.get_all_users()
     users.sort(key=lambda x: x.scores, reverse=True)
-    text = ''
+    users_dict = {}
     for user in users:
-        text += f'{user.get_full_name()}: {user.scores}'
+        if user.scores not in users_dict:
+            users_dict[user.scores] = []
+        users_dict[user.scores].append(user)
+    scores_sorted = list(users_dict.keys())
+    scores_sorted.sort(key=lambda x: x, reverse=True)
+    text = ''
+    for score in scores_sorted:
+        current_line = ', '.join(list(map(lambda x: x.get_full_name(), users_dict[score])))
+        current_line += f': {score}'
+        text += current_line.strip()
         text += '\n'
     return text.strip()
 
