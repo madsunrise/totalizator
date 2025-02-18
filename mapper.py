@@ -1,4 +1,4 @@
-from models import Event, EventResult, Bet, UserModel
+from models import Event, EventResult, Bet, UserModel, EventType
 
 
 def event_to_dict(event: Event) -> dict:
@@ -14,7 +14,7 @@ def event_to_dict(event: Event) -> dict:
         'team_1': event.team_1,
         'team_2': event.team_2,
         'time': event.time,
-        'is_playoff': event.is_playoff,
+        'type': event_type_to_int(event.event_type),
         'result': result_dict
     }
 
@@ -31,17 +31,44 @@ def parse_event(event_dict: dict) -> Event:
             team_2_scores=result_dict['team_2'],
             team_1_has_gone_through=team_1_has_gone_through
         )
-    is_playoff = False
-    if 'is_playoff' in event_dict:
-        is_playoff = event_dict['is_playoff']
+    event_type = EventType.SIMPLE
+    if 'is_playoff' in event_dict:  # deprecated, can be removed in future
+        event_type = EventType.PLAY_OFF_SECOND_MATCH
+    elif 'type' in event_dict:
+        event_type = parse_event_type(event_dict['type'])
+
     return Event(
         uuid=event_dict['uuid'],
         team_1=event_dict['team_1'],
         team_2=event_dict['team_2'],
         time=event_dict['time'],
-        is_playoff=is_playoff,
+        event_type=event_type,
         result=result_obj
     )
+
+
+def event_type_to_int(event_type: EventType) -> int:
+    match event_type:
+        case EventType.SIMPLE:
+            return 1
+        case EventType.PLAY_OFF_SINGLE_MATCH:
+            return 2
+        case EventType.PLAY_OFF_SECOND_MATCH:
+            return 3
+        case _:
+            raise ValueError(f'Unknown enum value: {event_type}')
+
+
+def parse_event_type(value: int) -> EventType:
+    match value:
+        case 1:
+            return EventType.SIMPLE
+        case 2:
+            return EventType.PLAY_OFF_SINGLE_MATCH
+        case 3:
+            return EventType.PLAY_OFF_SECOND_MATCH
+        case _:
+            raise ValueError(f'Unknown int value: {value}')
 
 
 def bet_to_dict(bet: Bet) -> dict:

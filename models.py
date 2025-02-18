@@ -10,12 +10,17 @@ class EventResult:
     def __init__(self, team_1_scores: int, team_2_scores: int, team_1_has_gone_through: bool | None):
         self.team_1_scores = team_1_scores
         self.team_2_scores = team_2_scores
-        self.team_1_has_gone_through = team_1_has_gone_through  # указываем None только для группового этапа,
-        # так как там никто дальше не проходит. Для плей-офф здесь всегда будет True или False.
+        self.team_1_has_gone_through = team_1_has_gone_through  # указываем None для матчах типа SIMPLE.
+        # В матчах PLAY_OFF_SINGLE_MATCH и PLAY_OFF_SECOND_MATCH обязательно будет или True, или False.
 
     def is_draw(self) -> bool:
         return self.team_1_scores == self.team_2_scores
 
+
+class EventType(Enum):
+    SIMPLE = 1  # Групповые этапы, а также первый матч в плей-офф, когда их два.
+    PLAY_OFF_SINGLE_MATCH = 2  # Единственный матч в плей-офф (когда нет ответного матча – например, финал).
+    PLAY_OFF_SECOND_MATCH = 3  # Второй матч в плей-офф, когда их два.
 
 class Event:
 
@@ -24,14 +29,14 @@ class Event:
                  team_1: str,
                  team_2: str,
                  time: datetime,
-                 is_playoff: bool,
+                 event_type: EventType,
                  result: EventResult | None = None,
                  ):
         self.uuid = uuid
         self.team_1 = team_1
         self.team_2 = team_2
         self.time = time
-        self.is_playoff = is_playoff
+        self.event_type = event_type
         self.result = result
 
     def get_time_in_utc(self) -> datetime:
@@ -54,6 +59,7 @@ class Event:
         return self.is_started() and not self.is_finished()
 
 
+
 class Bet:
 
     def __init__(self,
@@ -68,9 +74,10 @@ class Bet:
         self.event_uuid = event_uuid
         self.team_1_scores = team_1_scores
         self.team_2_scores = team_2_scores
-        self.team_1_will_go_through = team_1_will_go_through  # указываем None только для группового этапа,
-        # так как там никто дальше не проходит. Для плей-офф здесь всегда будет True или False. Только если
-        # юзер не поставит на ничью и проигнорирует кнопку с тем, кто пройдёт дальше (тогда будет None).
+        self.team_1_will_go_through = team_1_will_go_through
+        # указываем None для матчах типа SIMPLE. В матчах PLAY_OFF_SINGLE_MATCH и PLAY_OFF_SECOND_MATCH
+        # обязательно будет или True, или False. Только если юзер не поставит на ничью и проигнорирует кнопку с тем,
+        # кто пройдёт дальше (тогда будет None).
         self.created_at = created_at
 
     def is_bet_on_draw(self) -> bool:

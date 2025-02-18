@@ -20,7 +20,7 @@ import strings
 import telegram_utils
 import utils
 from database import Database
-from models import Event, EventResult, Bet, Guessers, GuessedEvent
+from models import Event, EventResult, Bet, Guessers, GuessedEvent, EventType
 
 locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
 bot = telebot.TeleBot(os.environ[constants.ENV_BOT_TOKEN])
@@ -39,8 +39,9 @@ def start(message):
 
 
 # Service method
-# Формат сообщения для группы: "Германия; Шотландия; 14.06.2024 22:00; group"
-# Формат сообщения для плей-офф: "Германия; Шотландия; 14.06.2024 22:00; playoff"
+# Формат сообщения для группового матча либо первого матча в плей-офф: "Германия; Шотландия; 14.06.2024 22:00; simple"
+# Формат сообщения для ответного (второго) матча в плей-офф: "Германия; Шотландия; 14.06.2024 22:00; playoff_second_match"
+# Формат сообщения для матча на вылет (например, финал): "Германия; Шотландия; 14.06.2024 22:00; playoff_single"
 @bot.message_handler(commands=['add_event'])
 def add_event(message):
     user = message.from_user
@@ -59,10 +60,12 @@ def add_event(message):
     date_format = '%d.%m.%Y %H:%M'
     datetime_obj = datetime.strptime(split[2], date_format)
 
-    if split[3] == 'playoff':
-        is_playoff = True
-    elif split[3] == 'group':
-        is_playoff = False
+    if split[3] == 'playoff_single':
+        event_type = EventType.PLAY_OFF_SINGLE_MATCH
+    elif split[3] == 'playoff_second_match':
+        event_type = EventType.PLAY_OFF_SECOND_MATCH
+    elif split[3] == 'simple':
+        event_type = EventType.SIMPLE
     else:
         bot.send_message(chat_id=message.chat.id, text=strings.WRONG_MESSAGE_FORMAT_ERROR)
         return
@@ -83,7 +86,7 @@ def add_event(message):
         team_1=team_1,
         team_2=team_2,
         time=event_datetime_utc,
-        is_playoff=is_playoff,
+        event_type=event_type,
     )
     database.add_event(event)
     msg = f"{strings.OK}: "
@@ -124,18 +127,35 @@ def set_result_for_event(message):
         bot.send_message(chat_id=message.chat.id, text=msg)
         return
 
-    if existing_event.is_playoff and team_1_scores == team_2_scores and len(split) != 3:
+    if existing_event.event_type == EventType.PLAY_OFF_SINGLE_MATCH and team_1_scores == team_2_scores and len(
+            split) != 3:
+        bot.send_message(chat_id=message.chat.id, text='Не указано, кто прошёл дальше!')
+        return
+    elif existing_event.event_type == EventType.PLAY_OFF_SECOND_MATCH and len(split) != 3:
+        # Здесь указать надо в любом случае, т.к. по счёту нельзя определить, кто прошёл.
         bot.send_message(chat_id=message.chat.id, text='Не указано, кто прошёл дальше!')
         return
 
-    team_1_has_gone_through = None  # Указываем True/False только в матчах плей-офф (для всех матчей!).
-    if existing_event.is_playoff:
-        if team_1_scores > team_2_scores:
-            team_1_has_gone_through = True
-        elif team_1_scores < team_2_scores:
-            team_1_has_gone_through = False
-        else:
-            # В случае ничьи указать прошедшую команду нужно явно.
+    event_type = existing_event.event_type
+    match event_type:
+        case EventType.SIMPLE:
+            team_1_has_gone_through = None
+        case EventType.PLAY_OFF_SINGLE_MATCH:
+            if team_1_scores > team_2_scores:
+                team_1_has_gone_through = True
+            elif team_1_scores < team_2_scores:
+                team_1_has_gone_through = False
+            else:
+                # В случае ничьи указать прошедшую команду нужно явно.
+                team_winner = split[2]
+                if team_winner.lower() == existing_event.team_1.lower():
+                    team_1_has_gone_through = True
+                elif team_winner.lower() == existing_event.team_2.lower():
+                    team_1_has_gone_through = False
+                else:
+                    bot.send_message(chat_id=message.chat.id, text=f'Неизвестная команда: {team_winner}')
+                    return
+        case EventType.PLAY_OFF_SECOND_MATCH:
             team_winner = split[2]
             if team_winner.lower() == existing_event.team_1.lower():
                 team_1_has_gone_through = True
@@ -144,6 +164,8 @@ def set_result_for_event(message):
             else:
                 bot.send_message(chat_id=message.chat.id, text=f'Неизвестная команда: {team_winner}')
                 return
+        case _:
+            raise ValueError(f'Unknown enum value: {event_type}')
 
     existing_event.result = EventResult(
         team_1_scores=team_1_scores,
@@ -154,7 +176,8 @@ def set_result_for_event(message):
     guessers = calculate_scores_after_finished_event(event=existing_event)
     msg_text = (f'Матч {existing_event.team_1} – {existing_event.team_2} завершился ' +
                 f'({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores}).')
-    if existing_event.is_playoff and team_1_scores == team_2_scores:
+
+    if event_type == EventType.PLAY_OFF_SINGLE_MATCH or event_type == EventType.PLAY_OFF_SECOND_MATCH:
         if existing_event.result.team_1_has_gone_through is None:
             raise ValueError('team_1_has_gone_through cannot be None here')
         msg_text += ' '
@@ -420,17 +443,12 @@ def send_message_with_results_for_last_12_hours(message):
             if event_result is None:
                 continue
             if bet is None:
-                bet = create_default_bet(user_id=user_id, event_uuid=event.uuid, is_play_off=event.is_playoff)
-            guessed_event = calculate_if_user_guessed_result(
-                event_result=event_result,
-                bet=bet,
-                is_playoff=event.is_playoff
-            )
+                bet = create_default_bet(user_id=user_id, event_uuid=event.uuid, event_type=event.event_type)
+            guessed_event = calculate_if_user_guessed_result(event_result=event_result, bet=bet)
             if guessed_event is not None:
                 scores_earned_total_by_user += convert_guessed_event_to_scores(guessed_event=guessed_event)
-            if event.is_playoff:
-                # Также можно получить +1 очко за проход одной из команд.
-                # Независимо от первой ставки.
+            if event.event_type != EventType.SIMPLE:
+                # Также можно получить +1 очко за проход одной из команд.Независимо от первой ставки.
                 if is_guessed_who_has_gone_through(result=event_result, bet=bet):
                     scores_earned_total_by_user += 1
         text += f'{user_model.get_full_name()}: +{scores_earned_total_by_user}'
@@ -604,49 +622,88 @@ def get_text_messages(message):
         team_1_scores = int(split_result[0])
         team_2_scores = int(split_result[1])
 
-        team_1_will_go_through = None
-        # Для группового этапа будет всегда None.
-        # Для плей-офф – True или False.
-        if event.is_playoff:
-            if team_1_scores > team_2_scores:
-                team_1_will_go_through = True
-            elif team_1_scores < team_2_scores:
-                team_1_will_go_through = False
-            else:
-                # оставляем None до момента уточнения юзером, кто пройдёт дальше.
-                team_1_will_go_through = None
+        match event.event_type:
+            case EventType.SIMPLE:
+                bet = Bet(
+                    user_id=user.id,
+                    event_uuid=event.uuid,
+                    team_1_scores=team_1_scores,
+                    team_2_scores=team_2_scores,
+                    team_1_will_go_through=None,
+                    created_at=datetime.now(timezone.utc)
+                )
+                database.add_bet(user_id=user.id, bet=bet)
+                database.clear_current_event_for_user(user_id=user.id)
+                bot.send_message(chat_id=message.chat.id,
+                                 text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
+                send_coming_events(user_id=user.id, chat_id=message.chat.id, send_error_if_all_bets_already_make=False)
+            case EventType.PLAY_OFF_SINGLE_MATCH:
+                if team_1_scores > team_2_scores:
+                    team_1_will_go_through = True
+                elif team_1_scores < team_2_scores:
+                    team_1_will_go_through = False
+                else:
+                    # оставляем None до момента уточнения юзером, кто пройдёт дальше.
+                    team_1_will_go_through = None
+                bet = Bet(
+                    user_id=user.id,
+                    event_uuid=event.uuid,
+                    team_1_scores=team_1_scores,
+                    team_2_scores=team_2_scores,
+                    team_1_will_go_through=team_1_will_go_through,
+                    created_at=datetime.now(timezone.utc)
+                )
+                database.add_bet(user_id=user.id, bet=bet)
+                database.clear_current_event_for_user(user_id=user.id)
+                if team_1_will_go_through is None:
+                    buttons_list = []
+                    callback_data_1 = callback_data_utils.create_team_1_will_go_through_callback_data(event)
+                    button_1 = InlineKeyboardButton(event.team_1, callback_data=callback_data_1)
+                    buttons_list.append(button_1)
+                    callback_data_2 = callback_data_utils.create_team_2_will_go_through_callback_data(event)
+                    button_2 = InlineKeyboardButton(event.team_2, callback_data=callback_data_2)
+                    buttons_list.append(button_2)
+                    markup = InlineKeyboardMarkup()
+                    markup.row(*buttons_list)
+                    bot.send_message(
+                        chat_id=message.chat.id,
+                        text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}. '
+                             f'Кто пройдёт дальше?',
+                        reply_markup=markup
+                    )
+                else:
+                    bot.send_message(chat_id=message.chat.id,
+                                     text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
+                    send_coming_events(user_id=user.id, chat_id=message.chat.id,
+                                       send_error_if_all_bets_already_make=False)
 
-        bet = Bet(
-            user_id=user.id,
-            event_uuid=event.uuid,
-            team_1_scores=team_1_scores,
-            team_2_scores=team_2_scores,
-            team_1_will_go_through=team_1_will_go_through,
-            created_at=datetime.now(timezone.utc)
-        )
-        database.add_bet(user_id=user.id, bet=bet)
-        database.clear_current_event_for_user(user_id=user.id)
-        # В случае ничьи нужно также поставить на проход одной из команд (но только для плей-офф).
-        if event.is_playoff and team_1_scores == team_2_scores:
-            buttons_list = []
-            callback_data_1 = callback_data_utils.create_team_1_will_go_through_callback_data(event)
-            button_1 = InlineKeyboardButton(event.team_1, callback_data=callback_data_1)
-            buttons_list.append(button_1)
-            callback_data_2 = callback_data_utils.create_team_2_will_go_through_callback_data(event)
-            button_2 = InlineKeyboardButton(event.team_2, callback_data=callback_data_2)
-            buttons_list.append(button_2)
-            markup = InlineKeyboardMarkup()
-            markup.row(*buttons_list)
-            bot.send_message(
-                chat_id=message.chat.id,
-                text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}. '
-                     f'Кто пройдёт дальше?',
-                reply_markup=markup
-            )
-        else:
-            bot.send_message(chat_id=message.chat.id,
-                             text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
-            send_coming_events(user_id=user.id, chat_id=message.chat.id, send_error_if_all_bets_already_make=False)
+            case EventType.PLAY_OFF_SECOND_MATCH:
+                bet = Bet(
+                    user_id=user.id,
+                    event_uuid=event.uuid,
+                    team_1_scores=team_1_scores,
+                    team_2_scores=team_2_scores,
+                    team_1_will_go_through=None,
+                    created_at=datetime.now(timezone.utc)
+                )
+                database.add_bet(user_id=user.id, bet=bet)
+                database.clear_current_event_for_user(user_id=user.id)
+                buttons_list = []
+                callback_data_1 = callback_data_utils.create_team_1_will_go_through_callback_data(event)
+                button_1 = InlineKeyboardButton(event.team_1, callback_data=callback_data_1)
+                buttons_list.append(button_1)
+                callback_data_2 = callback_data_utils.create_team_2_will_go_through_callback_data(event)
+                button_2 = InlineKeyboardButton(event.team_2, callback_data=callback_data_2)
+                buttons_list.append(button_2)
+                markup = InlineKeyboardMarkup()
+                markup.row(*buttons_list)
+                bot.send_message(
+                    chat_id=message.chat.id,
+                    text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}. '
+                         f'Кто пройдёт дальше?',
+                    reply_markup=markup
+                )
+
         msg_for_everybody = f'{user.full_name} сделал прогноз на матч {event.team_1} – {event.team_2}'
         bot.send_message(chat_id=get_target_chat_id(), text=msg_for_everybody)
     except:
@@ -746,13 +803,9 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
         bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
         if bet is None:
             logging.warning(f'User {user_model.username} has no bets on event, using default bet 0:0')
-            bet = create_default_bet(user_id=user_id, event_uuid=event.uuid, is_play_off=event.is_playoff)
+            bet = create_default_bet(user_id=user_id, event_uuid=event.uuid, event_type=event.event_type)
 
-        guessed_result = calculate_if_user_guessed_result(
-            event_result=result,
-            bet=bet,
-            is_playoff=event.is_playoff
-        )
+        guessed_result = calculate_if_user_guessed_result(event_result=result, bet=bet)
         scores_earned = 0
         if guessed_result is not None:
             scores_earned = convert_guessed_event_to_scores(guessed_result)
@@ -764,9 +817,8 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
                 case GuessedEvent.EXACT_SCORE:
                     guessed_total_score.append(user_model)
 
-        if event.is_playoff:
-            # Также можно получить +1 очко за проход одной из команд.
-            # Независимо от первой ставки.
+        if event.event_type != EventType.SIMPLE:
+            # Также можно получить +1 очко за проход одной из команд. Независимо от первой ставки.
             if is_guessed_who_has_gone_through(result=result, bet=bet):
                 scores_earned += 1
                 guessed_who_has_gone_through.append(user_model)
@@ -794,7 +846,7 @@ def convert_guessed_event_to_scores(guessed_event: GuessedEvent) -> int:
             raise ValueError(f'Unknown enum value: {guessed_event}')
 
 
-def calculate_if_user_guessed_result(event_result: EventResult, bet: Bet, is_playoff: bool) -> GuessedEvent | None:
+def calculate_if_user_guessed_result(event_result: EventResult, bet: Bet) -> GuessedEvent | None:
     if is_exact_score(result=event_result, bet=bet):
         return GuessedEvent.EXACT_SCORE
     elif is_same_goal_difference(result=event_result, bet=bet):
@@ -962,15 +1014,15 @@ def check_for_unfinished_events():
 
 
 def is_event_requires_finish(unfinished_event: Event) -> bool:
-    if unfinished_event.is_playoff:
+    if unfinished_event.event_type != EventType.SIMPLE:
         delta_hours = 3
     else:
         delta_hours = 2
     return unfinished_event.get_time_in_utc() + timedelta(hours=delta_hours) < datetime_utils.get_utc_time()
 
 
-def create_default_bet(user_id: int, event_uuid: str, is_play_off: bool) -> Bet:
-    if is_play_off:
+def create_default_bet(user_id: int, event_uuid: str, event_type: EventType) -> Bet:
+    if event_type != EventType.SIMPLE:
         team_1_will_go_through = True
     else:
         team_1_will_go_through = None
