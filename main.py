@@ -544,7 +544,11 @@ def callback_query(call):
                 text += (f'{event.team_1} – {event.team_2} ({event.get_time_in_moscow_zone().strftime('%d %b')}): '
                          f'{event.result.team_1_scores}:{event.result.team_2_scores} '
                          f'(прогноз {bet.team_1_scores}:{bet.team_2_scores}')
-                if bet.team_1_will_go_through is not None and bet.is_bet_on_draw():
+                need_to_show_who_will_go_through = (bet.team_1_will_go_through is not None and
+                                                    (event.event_type == EventType.PLAY_OFF_SECOND_MATCH or
+                                                     bet.is_bet_on_draw())
+                                                    )
+                if need_to_show_who_will_go_through:
                     if bet.team_1_will_go_through:
                         text += f', проход {event.team_1}'
                     else:
