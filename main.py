@@ -128,10 +128,10 @@ def set_result_for_event(message):
         return
 
     if existing_event.event_type == EventType.PLAY_OFF_SINGLE_MATCH and team_1_scores == team_2_scores and len(
-            split) != 3:
+            split) < 3:
         bot.send_message(chat_id=message.chat.id, text='Не указано, кто прошёл дальше!')
         return
-    elif existing_event.event_type == EventType.PLAY_OFF_SECOND_MATCH and len(split) != 3:
+    elif existing_event.event_type == EventType.PLAY_OFF_SECOND_MATCH and len(split) < 3:
         # Здесь указать надо в любом случае, т.к. по счёту нельзя определить, кто прошёл.
         bot.send_message(chat_id=message.chat.id, text='Не указано, кто прошёл дальше!')
         return
@@ -147,7 +147,7 @@ def set_result_for_event(message):
                 team_1_has_gone_through = False
             else:
                 # В случае ничьи указать прошедшую команду нужно явно.
-                team_winner = split[2]
+                team_winner = ' '.join(split[2:])
                 if team_winner.lower() == existing_event.team_1.lower():
                     team_1_has_gone_through = True
                 elif team_winner.lower() == existing_event.team_2.lower():
@@ -156,7 +156,7 @@ def set_result_for_event(message):
                     bot.send_message(chat_id=message.chat.id, text=f'Неизвестная команда: {team_winner}')
                     return
         case EventType.PLAY_OFF_SECOND_MATCH:
-            team_winner = split[2]
+            team_winner = ' '.join(split[2:])
             if team_winner.lower() == existing_event.team_1.lower():
                 team_1_has_gone_through = True
             elif team_winner.lower() == existing_event.team_2.lower():
