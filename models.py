@@ -131,3 +131,16 @@ class GuessedEvent(Enum):
     WINNER = 1
     GOAL_DIFFERENCE = 2
     EXACT_SCORE = 3
+
+
+class DetailedStatistic:
+    def __init__(self, user_model: UserModel,
+                 guessed_total_score_count: int,
+                 guessed_goal_difference_count: int,
+                 guessed_only_winner_count: int,
+                 guessed_who_has_gone_through_count: int):
+        self.user_model = user_model
+        self.guessed_total_score_count = guessed_total_score_count
+        self.guessed_goal_difference_count = guessed_goal_difference_count
+        self.guessed_only_winner_count = guessed_only_winner_count
+        self.guessed_who_has_gone_through_count = guessed_who_has_gone_through_count

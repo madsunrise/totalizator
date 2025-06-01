@@ -20,7 +20,7 @@ import strings
 import telegram_utils
 import utils
 from database import Database
-from models import Event, EventResult, Bet, Guessers, GuessedEvent, EventType
+from models import Event, EventResult, Bet, Guessers, GuessedEvent, EventType, DetailedStatistic, UserModel
 
 locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
 bot = telebot.TeleBot(os.environ[constants.ENV_BOT_TOKEN])
@@ -485,6 +485,22 @@ def delete_bet(message):
     bot.send_message(chat_id=message.chat.id, text=strings.OK)
 
 
+# Service method
+# Завершить турнир. Бот выводит финальные результаты и детальную аналитику.
+@bot.message_handler(commands=['finish_tournament'])
+def add_event(message):
+    user = message.from_user
+    if not is_maintainer(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    leaderbord_text = f'Итоговая таблица:\n\n{get_leaderboard_text()}'
+    detailed_statistic_text = get_detailed_statistic_text()
+    bot.send_message(chat_id=message.chat.id,
+                     text='Турнир завершён! Итоговая таблица и статистика по матчам приведены ниже.')
+    bot.send_message(chat_id=message.chat.id, text=leaderbord_text)
+    bot.send_message(chat_id=message.chat.id, text=detailed_statistic_text)
+
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     user = call.from_user
@@ -903,6 +919,67 @@ def get_leaderboard_text() -> str:
         current_line += f': {score}'
         text += current_line.strip()
         text += '\n'
+    return text.strip()
+
+
+def get_detailed_statistic_text() -> str:
+    users = database.get_all_users()
+    users.sort(key=lambda x: x.scores, reverse=True)
+    users_dict = {}
+    for user in users:
+        if user.scores not in users_dict:
+            users_dict[user.scores] = []
+        users_dict[user.scores].append(user)
+    scores_sorted = list(users_dict.keys())
+    scores_sorted.sort(key=lambda x: x, reverse=True)
+    text = 'Подробная аналитика по набранным очкам (указывается число матчей):\n\n'
+    for score in scores_sorted:
+        for user in users_dict[score]:
+            user_statistic = get_user_detailed_statistic(user_model=user)
+            user_text = get_user_statistic_formatted_text(statistic=user_statistic)
+            text += user_text
+            text += '\n\n'
+    return text.strip()
+
+
+def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
+    guessed_total_score_count = 0
+    guessed_goal_difference_count = 0
+    guessed_only_winner_count = 0
+    guessed_who_has_gone_through_count = 0
+    events = database.get_all_events()
+    for event in events:
+        result = event.result
+        if result is None:
+            continue
+        user_bet = database.find_bet(user_id=user_model.id, event_uuid=event.uuid)
+        if user_bet is None:
+            continue
+        is_guessed_event = calculate_if_user_guessed_result(event_result=result, bet=user_bet)
+        match is_guessed_event:
+            case GuessedEvent.WINNER:
+                guessed_only_winner_count += 1
+            case GuessedEvent.GOAL_DIFFERENCE:
+                guessed_goal_difference_count += 1
+            case GuessedEvent.EXACT_SCORE:
+                guessed_total_score_count += 1
+        if event.event_type != EventType.SIMPLE and is_guessed_who_has_gone_through(result=result, bet=user_bet):
+            guessed_who_has_gone_through_count += 1
+    return DetailedStatistic(
+        user_model=user_model,
+        guessed_total_score_count=guessed_total_score_count,
+        guessed_goal_difference_count=guessed_goal_difference_count,
+        guessed_only_winner_count=guessed_only_winner_count,
+        guessed_who_has_gone_through_count=guessed_who_has_gone_through_count
+    )
+
+
+def get_user_statistic_formatted_text(statistic: DetailedStatistic) -> str:
+    text = f'{statistic.user_model.get_full_name()}:\n'
+    text += f'Точный счёт: {statistic.guessed_total_score_count}\n'
+    text += f'Разница мячей: {statistic.guessed_goal_difference_count}\n'
+    text += f'Победитель: {statistic.guessed_only_winner_count}\n'
+    text += f'Проходы: {statistic.guessed_who_has_gone_through_count}'
     return text.strip()
 
 
