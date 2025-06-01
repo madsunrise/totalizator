@@ -863,7 +863,7 @@ def convert_guessed_event_to_scores(guessed_event: GuessedEvent) -> int:
         case GuessedEvent.WINNER:
             return 1
         case GuessedEvent.GOAL_DIFFERENCE:
-            return 2
+            return 3
         case GuessedEvent.EXACT_SCORE:
             return 4
         case _:
