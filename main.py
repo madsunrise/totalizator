@@ -849,7 +849,7 @@ def convert_guessed_event_to_scores(guessed_event: GuessedEvent) -> int:
         case GuessedEvent.GOAL_DIFFERENCE:
             return 2
         case GuessedEvent.EXACT_SCORE:
-            return 3
+            return 4
         case _:
             raise ValueError(f'Unknown enum value: {guessed_event}')
 
