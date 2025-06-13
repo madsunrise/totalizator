@@ -2,15 +2,14 @@ import csv
 import locale
 import logging
 import os
-import threading
-import time
-import traceback
-from datetime import datetime, timezone, timedelta
-
 import pytz
 import requests
 import schedule
 import telebot
+import threading
+import time
+import traceback
+from datetime import datetime, timezone, timedelta
 from telebot.types import User, InlineKeyboardMarkup, InlineKeyboardButton
 
 import callback_data_utils
@@ -488,7 +487,7 @@ def delete_bet(message):
 # Service method
 # Завершить турнир. Бот выводит финальные результаты и детальную аналитику.
 @bot.message_handler(commands=['finish_tournament'])
-def add_event(message):
+def finish_tournament(message):
     user = message.from_user
     if not is_maintainer(user=user):
         return
