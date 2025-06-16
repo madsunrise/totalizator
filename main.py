@@ -362,7 +362,7 @@ def clear_current_event(message):
 
 
 @bot.message_handler(commands=['my_bets'])
-def get_coming_events(message):
+def show_my_bets(message):
     user = message.from_user
     if not is_club_member(user=user):
         return
