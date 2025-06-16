@@ -1011,7 +1011,7 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
             continue
         user_bet = database.find_bet(user_id=user_model.id, event_uuid=event.uuid)
         if user_bet is None:
-            continue
+            user_bet = create_default_bet(user_id=user_model.id, event_uuid=event.uuid, event_type=event.event_type)
         is_guessed_event = calculate_if_user_guessed_result(event_result=result, bet=user_bet)
         match is_guessed_event:
             case GuessedEvent.WINNER:
