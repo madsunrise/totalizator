@@ -45,6 +45,28 @@ def create_show_my_already_played_bets() -> str:
     return 'show_my_already_played_bets'
 
 
+def is_delete_bet_button(callback_data: str) -> bool:
+    return callback_data == 'delete_bet_button'
+
+
+def create_delete_bet_button() -> str:
+    return 'delete_bet_button'
+
+
+def create_delete_specific_bet_callback_data(event_uuid: str) -> str:
+    return f'delete_specific_bet_{event_uuid}'
+
+
+def is_delete_specific_bet_callback_data(callback_data: str) -> bool:
+    return callback_data.startswith('delete_specific_bet_')
+
+
+def extract_uuid_from_delete_specific_bet_callback_data(callback_data: str) -> str:
+    if not is_delete_specific_bet_callback_data(callback_data):
+        raise ValueError('This is not make bet callback data')
+    return callback_data.removeprefix('delete_specific_bet_')
+
+
 def extract_uuid_from_team_2_will_go_through_callback_data(callback_data: str) -> str:
     if not is_team_2_will_go_through_callback_data(callback_data):
         raise ValueError('This is not team_2_will_go_through callback data')

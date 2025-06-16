@@ -370,49 +370,7 @@ def show_my_bets(message):
         bot.send_message(chat_id=message.chat.id, text=strings.WRITE_TO_PRIVATE_MESSAGES)
         return
     save_user_or_update_interaction(user=user)
-    all_bets = database.get_all_user_bets(user_id=user.id)
-    bets_with_events = []
-    for bet in all_bets:
-        event = database.get_event_by_uuid(uuid=bet.event_uuid)
-        if event is None:
-            continue
-        bets_with_events.append((bet, event))
-
-    if len(bets_with_events) == 0:
-        msg = 'Пока ничего нет. Начни с команды /coming_events.'
-        bot.send_message(chat_id=message.chat.id, text=msg)
-        return
-    bets_with_events.sort(key=lambda x: x[1].time, reverse=False)
-
-    bets_played = list(filter(lambda x: x[1].result is not None, bets_with_events))
-    bets_awaiting = list(filter(lambda x: x[1].result is None, bets_with_events))
-
-    text = ''
-    if len(bets_awaiting) > 0:
-        for (bet, event) in bets_awaiting:
-            text += (f'{event.team_1} – {event.team_2} ({event.get_time_in_moscow_zone().strftime('%d %b')}): '
-                     f'{bet.team_1_scores}:{bet.team_2_scores}')
-            need_to_show_who_will_go_through = (bet.team_1_will_go_through is not None and
-                                                (event.event_type == EventType.PLAY_OFF_SECOND_MATCH or
-                                                 bet.is_bet_on_draw())
-                                                )
-            if need_to_show_who_will_go_through:
-                if bet.team_1_will_go_through:
-                    text += f' (проход {event.team_1})'
-                else:
-                    text += f' (проход {event.team_2})'
-            text += '\n\n'
-    else:
-        text += 'Пока ничего нет. Начни с команды /coming_events.'
-
-    reply_markup = None
-    if len(bets_played) > 0:
-        callback_data = callback_data_utils.create_show_my_already_played_bets()
-        button = InlineKeyboardButton(text='Показать разыгранные', callback_data=callback_data)
-        reply_markup = InlineKeyboardMarkup()
-        reply_markup.add(button)
-
-    bot.send_message(chat_id=message.chat.id, text=text.strip(), reply_markup=reply_markup)
+    send_my_bets_message(chat_id=message.chat.id, user_id=user.id)
 
 
 @bot.message_handler(commands=['leaderboard'])
@@ -458,31 +416,6 @@ def send_message_with_results_for_last_12_hours(message):
         text += f'{user_model.get_full_name()}: +{scores_earned_total_by_user}'
         text += '\n'
     bot.send_message(chat_id=message.chat.id, text=text.strip())
-
-
-# Удалить сделанный прогноз. Формат сообщения: "/delete_bet 65619a74-44b2-4f81-9557-713dec9bfe96".
-@bot.message_handler(commands=['delete_bet'])
-def delete_bet(message):
-    user = message.from_user
-    if not is_club_member(user=user):
-        return
-    save_user_or_update_interaction(user=user)
-    event_uuid = message.text.removeprefix('/delete_bet').strip()
-    if not event_uuid:
-        bot.send_message(chat_id=message.chat.id, text=strings.WRONG_MESSAGE_FORMAT_ERROR)
-        return
-
-    existing_event = database.get_event_by_uuid(uuid=event_uuid)
-    if existing_event is None:
-        bot.send_message(chat_id=message.chat.id, text=strings.EVENT_NOT_FOUND_ERROR)
-        return
-
-    existing_bet = database.find_bet(user_id=user.id, event_uuid=existing_event.uuid)
-    if existing_bet is None:
-        bot.send_message(chat_id=message.chat.id, text='Прогноз на этот матч не найден.')
-        return
-    database.delete_bet(user_id=user.id, event_uuid=existing_event.uuid)
-    bot.send_message(chat_id=message.chat.id, text=strings.OK)
 
 
 @bot.message_handler(commands=['detailed_analytics'])
@@ -570,6 +503,53 @@ def callback_query(call):
                 text += ')'
                 text += '\n\n'
             telegram_utils.safe_send_message(bot=bot, chat_id=call.message.chat.id, text=text.strip())
+        elif callback_data_utils.is_delete_bet_button(call.data):
+            all_bets = database.get_all_user_bets(user_id=user.id)
+            bets_with_events = []
+            for bet in all_bets:
+                event = database.get_event_by_uuid(uuid=bet.event_uuid)
+                if event is None:
+                    continue
+                bets_with_events.append((bet, event))
+
+            bets_with_events.sort(key=lambda x: x[1].time, reverse=False)
+            bets_awaiting = list(filter(lambda x: x[1].result is None, bets_with_events))
+            if len(bets_awaiting) == 0:
+                msg = 'Ставок не обнаружено :('
+                bot.send_message(chat_id=call.message.chat.id, text=msg)
+                return
+
+            text = 'Выбери номер ставки для отмены'
+            buttons_list = []
+            index = 1
+            for (bet, _) in bets_awaiting:
+                callback_data = callback_data_utils.create_delete_specific_bet_callback_data(event_uuid=bet.event_uuid)
+                button = InlineKeyboardButton(str(index), callback_data=callback_data)
+                buttons_list.append(button)
+                index += 1
+            markup = InlineKeyboardMarkup()
+            markup.row(*buttons_list)
+            bot.send_message(chat_id=chat_id, text=text.strip(), reply_markup=markup)
+        elif callback_data_utils.is_delete_specific_bet_callback_data(call.data):
+            event_uuid = callback_data_utils.extract_uuid_from_delete_specific_bet_callback_data(call.data)
+            if not event_uuid:
+                bot.send_message(chat_id=chat_id, text='Что-то пошло не так :(')
+                return
+
+            existing_event = database.get_event_by_uuid(uuid=event_uuid)
+            if existing_event is None:
+                bot.send_message(chat_id=chat_id, text=strings.EVENT_NOT_FOUND_ERROR)
+                return
+
+            existing_bet = database.find_bet(user_id=user.id, event_uuid=existing_event.uuid)
+            if existing_bet is None:
+                bot.send_message(chat_id=chat_id, text='Ставка на этот матч не обнаружена.')
+                return
+            database.delete_bet(user_id=user.id, event_uuid=existing_event.uuid)
+            text = f'Ставка отменена: {existing_event.team_1} – {existing_event.team_2}.'
+            bot.send_message(chat_id=chat_id, text=text)
+            send_my_bets_message(chat_id=chat_id, user_id=user.id)
+
 
     except Exception as e:
         handle_exception(e=e, user=user, chat_id=chat_id)
@@ -794,7 +774,7 @@ def send_coming_events(user_id: int, chat_id: int, send_error_if_all_bets_alread
             bot.send_message(chat_id=chat_id, text='На все предстоящие матчи прогноз уже сделан.')
         return
 
-    text += '\nВыбери матч, на который хотел бы сделать прогноз.'
+    text += '\nВыбери матч для прогноза'
     buttons_list = []
     for (i, event) in events_available_for_bet_with_index:
         callback_data = callback_data_utils.create_make_bet_callback_data(event)
@@ -805,6 +785,60 @@ def send_coming_events(user_id: int, chat_id: int, send_error_if_all_bets_alread
     markup.row(*buttons_list)
     bot.send_message(chat_id=chat_id, text=text.strip(), reply_markup=markup)
 
+
+def send_my_bets_message(chat_id: int, user_id: int):
+    all_bets = database.get_all_user_bets(user_id=user_id)
+    bets_with_events = []
+    for bet in all_bets:
+        event = database.get_event_by_uuid(uuid=bet.event_uuid)
+        if event is None:
+            continue
+        bets_with_events.append((bet, event))
+
+    if len(bets_with_events) == 0:
+        msg = 'Пока ничего нет. Начни с команды /coming_events.'
+        bot.send_message(chat_id=chat_id, text=msg)
+        return
+    bets_with_events.sort(key=lambda x: x[1].time, reverse=False)
+
+    bets_played = list(filter(lambda x: x[1].result is not None, bets_with_events))
+    bets_awaiting = list(filter(lambda x: x[1].result is None, bets_with_events))
+
+    text = ''
+    if len(bets_awaiting) > 0:
+        index = 1
+        for (bet, event) in bets_awaiting:
+            text += f'{index}. '
+            index += 1
+            text += (f'{event.team_1} – {event.team_2} ({event.get_time_in_moscow_zone().strftime('%d %b')}): '
+                     f'{bet.team_1_scores}:{bet.team_2_scores}')
+            need_to_show_who_will_go_through = (bet.team_1_will_go_through is not None and
+                                                (event.event_type == EventType.PLAY_OFF_SECOND_MATCH or
+                                                 bet.is_bet_on_draw())
+                                                )
+            if need_to_show_who_will_go_through:
+                if bet.team_1_will_go_through:
+                    text += f' (проход {event.team_1})'
+                else:
+                    text += f' (проход {event.team_2})'
+            text += '\n\n'
+    else:
+        text += 'Пока ничего нет. Начни с команды /coming_events.'
+
+    reply_markup = InlineKeyboardMarkup()
+    if len(bets_played) > 0:
+        callback_data_already_played = callback_data_utils.create_show_my_already_played_bets()
+        already_played_button = InlineKeyboardButton(
+            text='Показать разыгранные',
+            callback_data=callback_data_already_played
+        )
+        reply_markup.add(already_played_button)
+
+    if len(bets_awaiting) > 0:
+        callback_data_delete_bet = callback_data_utils.create_delete_bet_button()
+        delete_bet_button = InlineKeyboardButton(text='Отменить ставку', callback_data=callback_data_delete_bet)
+        reply_markup.add(delete_bet_button)
+    bot.send_message(chat_id=chat_id, text=text.strip(), reply_markup=reply_markup)
 
 def calculate_scores_after_finished_event(event: Event) -> Guessers:
     guessed_total_score = []
