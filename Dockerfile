@@ -12,8 +12,10 @@ ENV LANGUAGE ru_RU:ru
 ENV LC_ALL ru_RU.UTF-8
 
 WORKDIR /app
-COPY . .
+COPY requirements.txt .
 RUN pip3 install -r requirements.txt
+# благодаря двум COPY если мы меняем только код, то предыдущие слои кэшируются и зависимости заново не ставятся.
+COPY . .
 ENTRYPOINT python3 ./main.py
 
 # сборка: docker buildx build --platform linux/amd64 -t totalizator:v1 .
