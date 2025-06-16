@@ -491,10 +491,10 @@ def get_detailed_analytics(message):
     if not is_maintainer(user=user):
         return
     save_user_or_update_interaction(user=user)
-    leaderbord_text = f'Общий рейтинг:\n\n{get_leaderboard_text()}'
+    leaderboard_text = f'Общий рейтинг:\n\n{get_leaderboard_text()}'
     detailed_statistic_text = get_detailed_statistic_text()
     matches_statistic = get_matches_result_statistic_text()
-    bot.send_message(chat_id=message.chat.id, text=leaderbord_text)
+    bot.send_message(chat_id=message.chat.id, text=leaderboard_text)
     bot.send_message(chat_id=message.chat.id, text=detailed_statistic_text)
     bot.send_message(chat_id=message.chat.id, text=matches_statistic)
 
