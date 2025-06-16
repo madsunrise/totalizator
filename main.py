@@ -599,10 +599,6 @@ def get_text_messages(message):
         return
 
     wrong_format_msg = 'Укажи счёт в формате \"X:X\" (например, \"1:0\"). Отменить: /clear_context.'
-    if len(message.text) != 3:
-        bot.send_message(chat_id=message.chat.id, text=wrong_format_msg)
-        return
-
     split_result = message.text.split(':')
     if len(split_result) != 2:
         bot.send_message(chat_id=message.chat.id, text=wrong_format_msg)
