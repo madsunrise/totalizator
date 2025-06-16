@@ -485,19 +485,15 @@ def delete_bet(message):
     bot.send_message(chat_id=message.chat.id, text=strings.OK)
 
 
-# Service method
-# Завершить турнир. Бот выводит финальные результаты и детальную аналитику.
-@bot.message_handler(commands=['finish_tournament'])
-def finish_tournament(message):
+@bot.message_handler(commands=['detailed_analytics'])
+def get_detailed_analytics(message):
     user = message.from_user
     if not is_maintainer(user=user):
         return
     save_user_or_update_interaction(user=user)
-    leaderbord_text = f'Итоговая таблица:\n\n{get_leaderboard_text()}'
+    leaderbord_text = f'Общий рейтинг:\n\n{get_leaderboard_text()}'
     detailed_statistic_text = get_detailed_statistic_text()
     matches_statistic = get_matches_result_statistic_text()
-    bot.send_message(chat_id=message.chat.id,
-                     text='Турнир завершён! Итоговая таблица и статистика по матчам приведены ниже.')
     bot.send_message(chat_id=message.chat.id, text=leaderbord_text)
     bot.send_message(chat_id=message.chat.id, text=detailed_statistic_text)
     bot.send_message(chat_id=message.chat.id, text=matches_statistic)
