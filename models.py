@@ -22,6 +22,7 @@ class EventType(Enum):
     PLAY_OFF_SINGLE_MATCH = 2  # Единственный матч в плей-офф (когда нет ответного матча – например, финал).
     PLAY_OFF_SECOND_MATCH = 3  # Второй матч в плей-офф, когда их два.
 
+
 class Event:
 
     def __init__(self,
@@ -57,7 +58,6 @@ class Event:
 
     def is_in_progress(self) -> bool:
         return self.is_started() and not self.is_finished()
-
 
 
 class Bet:
@@ -138,9 +138,12 @@ class DetailedStatistic:
                  guessed_total_score_count: int,
                  guessed_goal_difference_count: int,
                  guessed_only_winner_count: int,
-                 guessed_who_has_gone_through_count: int):
+                 guessed_who_has_gone_through_count: int,
+                 one_goal_from_total_score_count: int,
+                 ):
         self.user_model = user_model
         self.guessed_total_score_count = guessed_total_score_count
         self.guessed_goal_difference_count = guessed_goal_difference_count
         self.guessed_only_winner_count = guessed_only_winner_count
         self.guessed_who_has_gone_through_count = guessed_who_has_gone_through_count
+        self.one_goal_from_total_score_count = one_goal_from_total_score_count

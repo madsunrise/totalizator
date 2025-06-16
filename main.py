@@ -492,7 +492,7 @@ def get_detailed_analytics(message):
         return
     save_user_or_update_interaction(user=user)
     leaderboard_text = f'Общий рейтинг:\n\n{get_leaderboard_text()}'
-    detailed_statistic_text = get_detailed_statistic_text()
+    detailed_statistic_text = get_users_detailed_statistic_text()
     matches_statistic = get_matches_result_statistic_text()
     bot.send_message(chat_id=message.chat.id, text=leaderboard_text)
     bot.send_message(chat_id=message.chat.id, text=detailed_statistic_text)
@@ -737,10 +737,6 @@ def is_club_member(user: User) -> bool:
     return telegram_utils.is_chat_member(bot=bot, chat_id=get_target_chat_id(), user_id=user.id)
 
 
-def is_maintainer(user: User) -> bool:
-    return user.id in get_maintainer_ids()
-
-
 def save_user_or_update_interaction(user: User):
     inserted_new = database.register_user_if_required(
         user_id=user.id,
@@ -901,6 +897,15 @@ def is_guessed_who_has_gone_through(result: EventResult, bet: Bet) -> bool:
     return result.team_1_has_gone_through == bet.team_1_will_go_through
 
 
+def is_one_goal_from_total_score(event_result: EventResult, bet: Bet) -> bool:
+    if event_result.team_1_scores == bet.team_1_scores:
+        return bet.team_2_scores in [event_result.team_2_scores - 1, event_result.team_2_scores + 1]
+    elif event_result.team_2_scores == bet.team_2_scores:
+        return bet.team_1_scores in [event_result.team_1_scores - 1, event_result.team_1_scores + 1]
+    else:
+        return False
+
+
 def get_leaderboard_text() -> str:
     users = database.get_all_users()
     users.sort(key=lambda x: x.scores, reverse=True)
@@ -920,7 +925,7 @@ def get_leaderboard_text() -> str:
     return text.strip()
 
 
-def get_detailed_statistic_text() -> str:
+def get_users_detailed_statistic_text() -> str:
     users = database.get_all_users()
     users.sort(key=lambda x: x.scores, reverse=True)
     users_dict = {}
@@ -964,6 +969,7 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
     guessed_goal_difference_count = 0
     guessed_only_winner_count = 0
     guessed_who_has_gone_through_count = 0
+    one_goal_from_total_score_count = 0
     events = database.get_all_events()
     for event in events:
         result = event.result
@@ -982,12 +988,15 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
                 guessed_total_score_count += 1
         if event.event_type != EventType.SIMPLE and is_guessed_who_has_gone_through(result=result, bet=user_bet):
             guessed_who_has_gone_through_count += 1
+        if is_one_goal_from_total_score(event_result=result, bet=user_bet):
+            one_goal_from_total_score_count += 1
     return DetailedStatistic(
         user_model=user_model,
         guessed_total_score_count=guessed_total_score_count,
         guessed_goal_difference_count=guessed_goal_difference_count,
         guessed_only_winner_count=guessed_only_winner_count,
-        guessed_who_has_gone_through_count=guessed_who_has_gone_through_count
+        guessed_who_has_gone_through_count=guessed_who_has_gone_through_count,
+        one_goal_from_total_score_count=one_goal_from_total_score_count,
     )
 
 
@@ -996,7 +1005,8 @@ def get_user_statistic_formatted_text(statistic: DetailedStatistic) -> str:
     text += f'Точный счёт: {statistic.guessed_total_score_count}\n'
     text += f'Разница мячей: {statistic.guessed_goal_difference_count}\n'
     text += f'Победитель: {statistic.guessed_only_winner_count}\n'
-    text += f'Проходы: {statistic.guessed_who_has_gone_through_count}'
+    text += f'Проходы: {statistic.guessed_who_has_gone_through_count}\n'
+    text += f'В одном мяче от ТС: {statistic.one_goal_from_total_score_count}'
     return text.strip()
 
 
