@@ -2,14 +2,15 @@ import csv
 import locale
 import logging
 import os
-import pytz
-import requests
-import schedule
-import telebot
 import threading
 import time
 import traceback
 from datetime import datetime, timezone, timedelta
+
+import pytz
+import requests
+import schedule
+import telebot
 from telebot.types import User, InlineKeyboardMarkup, InlineKeyboardButton
 
 import callback_data_utils
@@ -494,10 +495,12 @@ def finish_tournament(message):
     save_user_or_update_interaction(user=user)
     leaderbord_text = f'Итоговая таблица:\n\n{get_leaderboard_text()}'
     detailed_statistic_text = get_detailed_statistic_text()
+    matches_statistic = get_matches_result_statistic_text()
     bot.send_message(chat_id=message.chat.id,
                      text='Турнир завершён! Итоговая таблица и статистика по матчам приведены ниже.')
     bot.send_message(chat_id=message.chat.id, text=leaderbord_text)
     bot.send_message(chat_id=message.chat.id, text=detailed_statistic_text)
+    bot.send_message(chat_id=message.chat.id, text=matches_statistic)
 
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -938,6 +941,25 @@ def get_detailed_statistic_text() -> str:
             user_text = get_user_statistic_formatted_text(statistic=user_statistic)
             text += user_text
             text += '\n\n'
+    return text.strip()
+
+
+def get_matches_result_statistic_text() -> str:
+    events = database.get_all_events()
+    total_matches = 0
+    draws_count = 0
+    for event in events:
+        result = event.result
+        if result is None:
+            continue
+        total_matches += 1
+        if result.is_draw():
+            draws_count += 1
+
+    text = 'Аналитика по матчам:\n\n'
+    text += f'Всего сыграно: {total_matches}'
+    text += '\n'
+    text += f'Из них ничьих: {draws_count}'
     return text.strip()
 
 
