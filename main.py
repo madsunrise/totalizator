@@ -979,18 +979,22 @@ def get_matches_result_statistic_text() -> str:
     events = database.get_all_events()
     total_matches = 0
     draws_count = 0
+    goals_scored = 0
     for event in events:
         result = event.result
         if result is None:
             continue
         total_matches += 1
+        goals_scored += result.team_1_scores + result.team_2_scores
         if result.is_draw():
             draws_count += 1
 
+    average_goals_per_match = goals_scored / total_matches
     text = 'Аналитика по матчам:\n\n'
-    text += f'Всего сыграно: {total_matches}'
-    text += '\n'
-    text += f'Из них ничьих: {draws_count}'
+    text += f'Всего сыграно: {total_matches}\n'
+    text += f'Из них ничьих: {draws_count}\n'
+    text += f'Голов забито в основное время: {goals_scored}\n'
+    text += f'В среднем голов в основное время: {average_goals_per_match:.1f}\n'
     return text.strip()
 
 
