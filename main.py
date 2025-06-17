@@ -545,6 +545,11 @@ def callback_query(call):
             if existing_bet is None:
                 bot.send_message(chat_id=chat_id, text='Ставка на этот матч не обнаружена.')
                 return
+
+            if existing_event.is_started():
+                bot.send_message(chat_id=chat_id, text=strings.EVENT_HAS_ALREADY_STARTED)
+                return
+
             database.delete_bet(user_id=user.id, event_uuid=existing_event.uuid)
             text = f'Ставка отменена: {existing_event.team_1} – {existing_event.team_2}.'
             bot.send_message(chat_id=chat_id, text=text)
@@ -605,7 +610,7 @@ def get_text_messages(message):
         return
 
     if event.is_started():
-        bot.send_message(chat_id=message.chat.id, text=strings.EVENT_HAS_ALREADY_STARTER_YOU_ARE_LATE)
+        bot.send_message(chat_id=message.chat.id, text=strings.EVENT_HAS_ALREADY_STARTED)
         database.clear_current_event_for_user(user_id=user.id)
         return
 

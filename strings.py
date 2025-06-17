@@ -4,4 +4,4 @@ WRITE_TO_PRIVATE_MESSAGES = 'Напиши мне в личные сообщен�
 EVENT_ALREADY_EXIST_ERROR = 'Такой матч уже существует!'
 EVENT_NOT_FOUND_ERROR = 'Матч не найден :/'
 WRONG_MESSAGE_FORMAT_ERROR = 'Неверный формат сообщения'
-EVENT_HAS_ALREADY_STARTER_YOU_ARE_LATE = 'Матч уже начался, ты опоздал :('
+EVENT_HAS_ALREADY_STARTED = 'Матч уже начался!'
