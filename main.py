@@ -1069,6 +1069,7 @@ def run_scheduler():
 def do_every_ten_minutes():
     send_morning_message_with_games_today()
     check_coming_soon_events()
+    check_for_night_events()
     check_for_unfinished_events()
 
 
@@ -1126,6 +1127,46 @@ def check_coming_soon_events():
     for event in coming_very_soon_events:
         header = f'‼️ LAST CALL ‼️'
         send_event_will_start_soon_warning(event_uuid=event.uuid, header_text=header)
+
+
+def check_for_night_events():
+    # Проверяем ночные матчи в интервале 20:40 – 20:50
+    moscow_time = datetime_utils.get_moscow_time()
+    if moscow_time.hour != 20 or moscow_time.minute not in range(40, 50):
+        return
+
+    # Проверяем все матчи, которые начнутся с 00:40(00:50) до 08:40(08:50).
+    event_datetime_utc_start = datetime_utils.get_utc_time() + timedelta(hours=4)
+    event_datetime_utc_end = event_datetime_utc_start + timedelta(hours=8)
+
+    coming_soon_night_events = database.find_events_in_time_range(
+        from_inclusive=event_datetime_utc_start,
+        to_exclusive=event_datetime_utc_end,
+    )
+
+    if len(coming_soon_night_events) == 0:
+        return
+
+    all_users = database.get_all_users()
+    already_mentioned_users = set()
+    text = 'Не забудьте про ночные матчи!\n\n'
+
+    for event in coming_soon_night_events:
+        users_without_bets = list(
+            filter(lambda x: database.find_bet(user_id=x.id, event_uuid=event.uuid) is None, all_users)
+        )
+        for user in users_without_bets:
+            if user in already_mentioned_users:
+                continue
+            already_mentioned_users.add(user)
+            if user.username:
+                text += f'@{user.username}'
+            else:
+                text += user.first_name
+            text += ' '
+
+    if len(already_mentioned_users) > 0:
+        bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
 
 
 def send_event_will_start_soon_warning(event_uuid: str, header_text: str):
