@@ -382,12 +382,12 @@ def get_leaderboard(message):
     bot.send_message(chat_id=message.chat.id, text=get_leaderboard_text())
 
 
-@bot.message_handler(commands=['last_12_hours'])
-def send_message_with_results_for_last_12_hours(message):
+@bot.message_handler(commands=['last_18_hours'])
+def send_message_with_results_for_last_18_hours(message):
     user = message.from_user
     if not is_club_member(user=user):
         return
-    hours = 12
+    hours = 18
     to_time = datetime_utils.get_utc_time()
     from_time = to_time - timedelta(hours=hours)
     events_for_this_period = database.find_events_in_time_range(from_inclusive=from_time, to_exclusive=to_time)
