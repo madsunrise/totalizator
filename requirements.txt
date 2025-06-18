@@ -1,5 +1,5 @@
 telebot~=0.0.5
 pymongo~=4.13.2
-pytz~=2024.1
+pytz~=2025.2
 schedule~=1.2.2
 requests~=2.32.3
