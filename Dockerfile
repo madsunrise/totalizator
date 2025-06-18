@@ -7,9 +7,9 @@ RUN apt-get update && apt-get install -y locales && rm -rf /var/lib/apt/lists/*
 RUN sed -i '/ru_RU.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 
 # Set the locale environment variable
-ENV LANG ru_RU.UTF-8
-ENV LANGUAGE ru_RU:ru
-ENV LC_ALL ru_RU.UTF-8
+ENV LANG=ru_RU.UTF-8
+ENV LANGUAGE=ru_RU:ru
+ENV LC_ALL=ru_RU.UTF-8
 
 WORKDIR /app
 COPY requirements.txt .
