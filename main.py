@@ -1191,6 +1191,9 @@ def send_event_will_start_soon_warning(event_uuid: str, header_text: str):
 
 
 def check_for_unfinished_events():
+    utc_time = datetime_utils.get_utc_time()
+    if utc_time.minute not in range(10, 20):
+        return
     all_events = database.get_all_events()
     events_on_progress = list(filter(lambda x: x.is_in_progress(), all_events))
     result_events = list(filter(lambda x: is_event_requires_finish(x), events_on_progress))
