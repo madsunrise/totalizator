@@ -405,7 +405,7 @@ def send_message_with_results_for_last_18_hours(message):
             if event_result is None:
                 continue
             if bet is None:
-                bet = create_default_bet(user_id=user_id, event_uuid=event.uuid, event_type=event.event_type)
+                continue
             guessed_event = calculate_if_user_guessed_result(event_result=event_result, bet=bet)
             if guessed_event is not None:
                 scores_earned_total_by_user += convert_guessed_event_to_scores(guessed_event=guessed_event)
@@ -855,9 +855,7 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
         user_id = user_model.id
         bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
         if bet is None:
-            logging.warning(f'User {user_model.username} has no bets on event, using default bet 0:0')
-            bet = create_default_bet(user_id=user_id, event_uuid=event.uuid, event_type=event.event_type)
-
+            continue
         guessed_result = calculate_if_user_guessed_result(event_result=result, bet=bet)
         scores_earned = 0
         if guessed_result is not None:
@@ -1016,6 +1014,8 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
             continue
         user_bet = database.find_bet(user_id=user_model.id, event_uuid=event.uuid)
         if user_bet is None:
+            if event.time.month >= 7:
+                continue
             user_bet = create_default_bet(user_id=user_model.id, event_uuid=event.uuid, event_type=event.event_type)
         is_guessed_event = calculate_if_user_guessed_result(event_result=result, bet=user_bet)
         match is_guessed_event:
@@ -1216,6 +1216,7 @@ def is_event_requires_finish(unfinished_event: Event) -> bool:
     return unfinished_event.get_time_in_utc() + timedelta(hours=delta_hours) < datetime_utils.get_utc_time()
 
 
+# Deprecated
 def create_default_bet(user_id: int, event_uuid: str, event_type: EventType) -> Bet:
     if event_type != EventType.SIMPLE:
         team_1_will_go_through = True
