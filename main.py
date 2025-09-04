@@ -844,6 +844,7 @@ def send_my_bets_message(chat_id: int, user_id: int):
 def calculate_scores_after_finished_event(event: Event) -> Guessers:
     guessed_total_score = []
     guessed_goal_difference = []
+    guessed_draw = []
     guessed_only_winner = []
     guessed_who_has_gone_through = []
 
@@ -863,6 +864,8 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
             match guessed_result:
                 case GuessedEvent.WINNER:
                     guessed_only_winner.append(user_model)
+                case GuessedEvent.DRAW:
+                    guessed_draw.append(user_model)
                 case GuessedEvent.GOAL_DIFFERENCE:
                     guessed_goal_difference.append(user_model)
                 case GuessedEvent.EXACT_SCORE:
@@ -879,6 +882,7 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
 
     return Guessers(
         guessed_total_score=guessed_total_score,
+        guessed_draw=guessed_draw,
         guessed_goal_difference=guessed_goal_difference,
         guessed_only_winner=guessed_only_winner,
         guessed_who_has_gone_through=guessed_who_has_gone_through,
@@ -889,6 +893,8 @@ def convert_guessed_event_to_scores(guessed_event: GuessedEvent) -> int:
     match guessed_event:
         case GuessedEvent.WINNER:
             return 1
+        case GuessedEvent.DRAW:
+            return 2
         case GuessedEvent.GOAL_DIFFERENCE:
             return 3
         case GuessedEvent.EXACT_SCORE:
@@ -900,6 +906,8 @@ def convert_guessed_event_to_scores(guessed_event: GuessedEvent) -> int:
 def calculate_if_user_guessed_result(event_result: EventResult, bet: Bet) -> GuessedEvent | None:
     if is_exact_score(result=event_result, bet=bet):
         return GuessedEvent.EXACT_SCORE
+    elif is_guessed_draw(result=event_result, bet=bet):
+        return GuessedEvent.DRAW
     elif is_same_goal_difference(result=event_result, bet=bet):
         return GuessedEvent.GOAL_DIFFERENCE
     elif is_same_winner(result=event_result, bet=bet):
@@ -911,6 +919,9 @@ def calculate_if_user_guessed_result(event_result: EventResult, bet: Bet) -> Gue
 def is_exact_score(result: EventResult, bet: Bet) -> bool:
     return result.team_1_scores == bet.team_1_scores and result.team_2_scores == bet.team_2_scores
 
+
+def is_guessed_draw(result: EventResult, bet: Bet) -> bool:
+    return result.team_1_scores == result.team_2_scores and bet.team_1_scores == bet.team_2_scores
 
 def is_same_goal_difference(result: EventResult, bet: Bet) -> bool:
     return result.team_1_scores - result.team_2_scores == bet.team_1_scores - bet.team_2_scores

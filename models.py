@@ -113,10 +113,12 @@ class UserModel:
 class Guessers:
     def __init__(self, guessed_total_score: list,
                  guessed_goal_difference: list,
+                 guessed_draw: list,
                  guessed_only_winner: list,
                  guessed_who_has_gone_through: list):
         self.guessed_total_score = guessed_total_score
         self.guessed_goal_difference = guessed_goal_difference
+        self.guessed_draw = guessed_draw
         self.guessed_only_winner = guessed_only_winner
         self.guessed_who_has_gone_through = guessed_who_has_gone_through
 
@@ -130,7 +132,8 @@ class Guessers:
 class GuessedEvent(Enum):
     WINNER = 1
     GOAL_DIFFERENCE = 2
-    EXACT_SCORE = 3
+    DRAW = 3
+    EXACT_SCORE = 4
 
 
 class DetailedStatistic:
