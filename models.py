@@ -125,6 +125,7 @@ class Guessers:
     def is_everything_empty(self) -> bool:
         return (len(self.guessed_total_score) == 0 and
                 len(self.guessed_goal_difference) == 0 and
+                len(self.guessed_draw) == 0 and
                 len(self.guessed_only_winner) == 0 and
                 len(self.guessed_who_has_gone_through) == 0)
 

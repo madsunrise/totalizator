@@ -215,6 +215,17 @@ def set_result_for_event(message):
                 msg_text += '\n'
             msg_text += '\n'
 
+        if len(guessers.guessed_draw) == 1:
+            msg_text += f'{guessers.guessed_draw[0].get_full_name()} угадал ничью.'
+            msg_text += '\n\n'
+        elif len(guessers.guessed_draw) > 1:
+            msg_text += 'Угадали ничью:'
+            msg_text += '\n'
+            for user_model in guessers.guessed_draw:
+                msg_text += user_model.get_full_name()
+                msg_text += '\n'
+            msg_text += '\n'
+
         if len(guessers.guessed_only_winner) == 1:
             msg_text += f'{guessers.guessed_only_winner[0].get_full_name()} угадал исход.'
             msg_text += '\n\n'
