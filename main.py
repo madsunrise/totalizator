@@ -953,7 +953,9 @@ def is_guessed_who_has_gone_through(result: EventResult, bet: Bet) -> bool:
 
 
 def is_one_goal_from_total_score(event_result: EventResult, bet: Bet) -> bool:
-    if event_result.team_1_scores == bet.team_1_scores:
+    if not is_same_winner(event_result, bet):
+        return False
+    elif event_result.team_1_scores == bet.team_1_scores:
         return bet.team_2_scores in [event_result.team_2_scores - 1, event_result.team_2_scores + 1]
     elif event_result.team_2_scores == bet.team_2_scores:
         return bet.team_1_scores in [event_result.team_1_scores - 1, event_result.team_1_scores + 1]
@@ -1070,7 +1072,7 @@ def get_user_statistic_formatted_text(statistic: DetailedStatistic) -> str:
     text += f'Ничьи: {statistic.guessed_draw_count}\n'
     text += f'Победитель: {statistic.guessed_only_winner_count}\n'
     text += f'Проходы: {statistic.guessed_who_has_gone_through_count}\n'
-    text += f'В одном мяче от ТС: {statistic.one_goal_from_total_score_count}'
+    text += f'В одном мяче от ТС с учётом исхода матча: {statistic.one_goal_from_total_score_count}'
     return text.strip()
 
 
