@@ -141,6 +141,7 @@ class DetailedStatistic:
     def __init__(self, user_model: UserModel,
                  guessed_total_score_count: int,
                  guessed_goal_difference_count: int,
+                 guessed_draw_count: int,
                  guessed_only_winner_count: int,
                  guessed_who_has_gone_through_count: int,
                  one_goal_from_total_score_count: int,
@@ -148,6 +149,7 @@ class DetailedStatistic:
         self.user_model = user_model
         self.guessed_total_score_count = guessed_total_score_count
         self.guessed_goal_difference_count = guessed_goal_difference_count
+        self.guessed_draw_count = guessed_draw_count
         self.guessed_only_winner_count = guessed_only_winner_count
         self.guessed_who_has_gone_through_count = guessed_who_has_gone_through_count
         self.one_goal_from_total_score_count = one_goal_from_total_score_count

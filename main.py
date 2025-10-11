@@ -1026,6 +1026,7 @@ def get_matches_result_statistic_text() -> str:
 def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
     guessed_total_score_count = 0
     guessed_goal_difference_count = 0
+    guessed_draw_count = 0
     guessed_only_winner_count = 0
     guessed_who_has_gone_through_count = 0
     one_goal_from_total_score_count = 0
@@ -1045,6 +1046,8 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
                 guessed_only_winner_count += 1
             case GuessedEvent.GOAL_DIFFERENCE:
                 guessed_goal_difference_count += 1
+            case GuessedEvent.DRAW:
+                guessed_draw_count += 1
             case GuessedEvent.EXACT_SCORE:
                 guessed_total_score_count += 1
         if event.event_type != EventType.SIMPLE and is_guessed_who_has_gone_through(result=result, bet=user_bet):
@@ -1055,6 +1058,7 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
         user_model=user_model,
         guessed_total_score_count=guessed_total_score_count,
         guessed_goal_difference_count=guessed_goal_difference_count,
+        guessed_draw_count=guessed_draw_count,
         guessed_only_winner_count=guessed_only_winner_count,
         guessed_who_has_gone_through_count=guessed_who_has_gone_through_count,
         one_goal_from_total_score_count=one_goal_from_total_score_count,
@@ -1065,6 +1069,7 @@ def get_user_statistic_formatted_text(statistic: DetailedStatistic) -> str:
     text = f'{statistic.user_model.get_full_name()}:\n'
     text += f'Точный счёт: {statistic.guessed_total_score_count}\n'
     text += f'Разница мячей: {statistic.guessed_goal_difference_count}\n'
+    text += f'Ничьи: {statistic.guessed_draw_count}\n'
     text += f'Победитель: {statistic.guessed_only_winner_count}\n'
     text += f'Проходы: {statistic.guessed_who_has_gone_through_count}\n'
     text += f'В одном мяче от ТС: {statistic.one_goal_from_total_score_count}'
