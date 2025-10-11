@@ -1037,9 +1037,7 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
             continue
         user_bet = database.find_bet(user_id=user_model.id, event_uuid=event.uuid)
         if user_bet is None:
-            if event.time.month >= 7:
-                continue
-            user_bet = create_default_bet(user_id=user_model.id, event_uuid=event.uuid, event_type=event.event_type)
+            continue
         is_guessed_event = calculate_if_user_guessed_result(event_result=result, bet=user_bet)
         match is_guessed_event:
             case GuessedEvent.WINNER:
@@ -1241,23 +1239,6 @@ def is_event_requires_finish(unfinished_event: Event) -> bool:
     else:
         delta_hours = 2
     return unfinished_event.get_time_in_utc() + timedelta(hours=delta_hours) < datetime_utils.get_utc_time()
-
-
-# Deprecated
-def create_default_bet(user_id: int, event_uuid: str, event_type: EventType) -> Bet:
-    if event_type != EventType.SIMPLE:
-        team_1_will_go_through = True
-    else:
-        team_1_will_go_through = None
-
-    return Bet(
-        user_id=user_id,
-        event_uuid=event_uuid,
-        team_1_scores=0,
-        team_2_scores=0,
-        team_1_will_go_through=team_1_will_go_through,
-        created_at=datetime.now(timezone.utc)
-    )
 
 
 if __name__ == '__main__':
