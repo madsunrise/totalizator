@@ -1133,7 +1133,7 @@ def send_morning_message_with_games_today():
             match_time = event.get_time_in_moscow_zone().strftime('%H:%M')
             text += f'{event.team_1} – {event.team_2} в {match_time}'
             text += '\n'
-    text += '-----\n'
+    text += '\n-----\n'
     text += get_leaderboard_text()
     bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
 
