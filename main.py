@@ -852,6 +852,7 @@ def send_my_bets_message(chat_id: int, user_id: int):
         reply_markup.add(delete_bet_button)
     bot.send_message(chat_id=chat_id, text=text.strip(), reply_markup=reply_markup)
 
+
 def calculate_scores_after_finished_event(event: Event) -> Guessers:
     guessed_total_score = []
     guessed_goal_difference = []
@@ -934,6 +935,7 @@ def is_exact_score(result: EventResult, bet: Bet) -> bool:
 def is_guessed_draw(result: EventResult, bet: Bet) -> bool:
     return result.team_1_scores == result.team_2_scores and bet.team_1_scores == bet.team_2_scores
 
+
 def is_same_goal_difference(result: EventResult, bet: Bet) -> bool:
     return result.team_1_scores - result.team_2_scores == bet.team_1_scores - bet.team_2_scores
 
@@ -952,10 +954,21 @@ def is_guessed_who_has_gone_through(result: EventResult, bet: Bet) -> bool:
     return result.team_1_has_gone_through == bet.team_1_will_go_through
 
 
-def is_one_goal_from_total_score(event_result: EventResult, bet: Bet) -> bool:
+def is_one_goal_from_total_score_winner_consider(event_result: EventResult, bet: Bet) -> bool:
     if not is_same_winner(event_result, bet):
         return False
     elif event_result.team_1_scores == bet.team_1_scores:
+        return bet.team_2_scores in [event_result.team_2_scores - 1, event_result.team_2_scores + 1]
+    elif event_result.team_2_scores == bet.team_2_scores:
+        return bet.team_1_scores in [event_result.team_1_scores - 1, event_result.team_1_scores + 1]
+    else:
+        return False
+
+
+def is_one_goal_from_total_score_with_two_or_more_scores(event_result: EventResult, bet: Bet) -> bool:
+    if event_result.team_1_scores + event_result.team_2_scores < 2:
+        return False
+    if event_result.team_1_scores == bet.team_1_scores:
         return bet.team_2_scores in [event_result.team_2_scores - 1, event_result.team_2_scores + 1]
     elif event_result.team_2_scores == bet.team_2_scores:
         return bet.team_1_scores in [event_result.team_1_scores - 1, event_result.team_1_scores + 1]
@@ -1031,7 +1044,8 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
     guessed_draw_count = 0
     guessed_only_winner_count = 0
     guessed_who_has_gone_through_count = 0
-    one_goal_from_total_score_count = 0
+    one_goal_from_total_score_count_with_winner_consider = 0
+    one_goal_from_total_score_count_exclude_winner = 0
     events = database.get_all_events()
     for event in events:
         result = event.result
@@ -1052,8 +1066,10 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
                 guessed_total_score_count += 1
         if event.event_type != EventType.SIMPLE and is_guessed_who_has_gone_through(result=result, bet=user_bet):
             guessed_who_has_gone_through_count += 1
-        if is_one_goal_from_total_score(event_result=result, bet=user_bet):
-            one_goal_from_total_score_count += 1
+        if is_one_goal_from_total_score_winner_consider(event_result=result, bet=user_bet):
+            one_goal_from_total_score_count_with_winner_consider += 1
+        elif is_one_goal_from_total_score_with_two_or_more_scores(event_result=result, bet=user_bet):
+            one_goal_from_total_score_count_exclude_winner += 1
     return DetailedStatistic(
         user_model=user_model,
         guessed_total_score_count=guessed_total_score_count,
@@ -1061,7 +1077,8 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
         guessed_draw_count=guessed_draw_count,
         guessed_only_winner_count=guessed_only_winner_count,
         guessed_who_has_gone_through_count=guessed_who_has_gone_through_count,
-        one_goal_from_total_score_count=one_goal_from_total_score_count,
+        one_goal_from_total_score_count_with_winner_consider=one_goal_from_total_score_count_with_winner_consider,
+        one_goal_from_total_score_count_exclude_winner=one_goal_from_total_score_count_exclude_winner,
     )
 
 
@@ -1072,7 +1089,8 @@ def get_user_statistic_formatted_text(statistic: DetailedStatistic) -> str:
     text += f'Ничьи: {statistic.guessed_draw_count}\n'
     text += f'Победитель: {statistic.guessed_only_winner_count}\n'
     text += f'Проходы: {statistic.guessed_who_has_gone_through_count}\n'
-    text += f'В одном мяче от ТС с учётом исхода матча: {statistic.one_goal_from_total_score_count}'
+    text += f'В одном мяче от ТС с учётом исхода матча: {statistic.one_goal_from_total_score_count_with_winner_consider}\n'
+    text += f'В одном мяче от ТС в иных случаях (только матчи с двумя и более голами): {statistic.one_goal_from_total_score_count_exclude_winner}\n'
     return text.strip()
 
 
