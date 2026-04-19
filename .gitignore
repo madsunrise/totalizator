@@ -235,3 +235,4 @@ fabric.properties
 .idea/misc.xml
 
 .DS_Store
+*.tar
