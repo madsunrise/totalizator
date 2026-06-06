@@ -161,3 +161,66 @@ class DetailedStatistic:
         self.guessed_who_has_gone_through_count = guessed_who_has_gone_through_count
         self.one_goal_from_total_score_count_with_winner_consider = one_goal_from_total_score_count_with_winner_consider
         self.one_goal_from_total_score_count_exclude_winner = one_goal_from_total_score_count_exclude_winner
+
+
+class Group:
+    # Группа турнира: id (буква, которую ввёл мейнтейнер) + упорядоченный список команд.
+    def __init__(self, id: str, name: str, teams: list):
+        self.id = id
+        self.name = name
+        self.teams = teams
+
+
+class Tournament:
+    # Изолированная структура турнира для спецставок (чемпион + чемпионы групп).
+    # Не связана с Event/Bet/джокерами; хранится в отдельной коллекции одним документом.
+    def __init__(self,
+                 name: str,
+                 created_at: datetime,
+                 groups: list,
+                 champion_bet_open: bool = False,
+                 group_bet_open: bool = False,
+                 champion_winner: str | None = None,
+                 group_winners: dict | None = None,
+                 champion_settled: bool = False,
+                 group_settled: bool = False,
+                 ):
+        self.name = name
+        self.created_at = created_at
+        self.groups = groups
+        self.champion_bet_open = champion_bet_open
+        self.group_bet_open = group_bet_open
+        self.champion_winner = champion_winner
+        self.group_winners = group_winners
+        self.champion_settled = champion_settled
+        self.group_settled = group_settled
+
+    def all_teams(self) -> list:
+        # Кандидаты в чемпионы = все команды по всем группам, в порядке групп/команд.
+        return [team for group in self.groups for team in group.teams]
+
+    def group_count(self) -> int:
+        return len(self.groups)
+
+    def get_group(self, group_id: str) -> Group | None:
+        needle = group_id.strip().casefold()
+        return next((g for g in self.groups if g.id.casefold() == needle), None)
+
+    def find_team(self, team_name: str) -> str | None:
+        # Case-insensitive, trimmed поиск по всем командам; возвращает каноническое
+        # написание из структуры (чтобы хранить и сравнивать единообразно).
+        needle = team_name.strip().casefold()
+        for team in self.all_teams():
+            if team.casefold() == needle:
+                return team
+        return None
+
+    def find_team_in_group(self, group_id: str, team_name: str) -> str | None:
+        group = self.get_group(group_id)
+        if group is None:
+            return None
+        needle = team_name.strip().casefold()
+        for team in group.teams:
+            if team.casefold() == needle:
+                return team
+        return None

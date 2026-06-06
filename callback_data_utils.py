@@ -130,3 +130,91 @@ def extract_uuid_from_team_2_will_go_through_callback_data(callback_data: str) -
     if not is_team_2_will_go_through_callback_data(callback_data):
         raise ValueError('This is not team_2_will_go_through callback data')
     return callback_data.removeprefix('team_2_will_go_through_')
+
+
+# --- Спецставки: ставка на чемпиона турнира ---------------------------------------
+# В callback_data едут ТОЛЬКО индексы (имена команд — лишь в тексте кнопок),
+# поэтому всё надёжно укладывается в лимит Telegram 64 байта.
+
+def create_champion_open() -> str:
+    return 'champ_open'
+
+
+def is_champion_open(callback_data: str) -> bool:
+    return callback_data == 'champ_open'
+
+
+def create_champion_group(group_index: int) -> str:
+    return f'champgrp_{group_index}'
+
+
+def is_champion_group(callback_data: str) -> bool:
+    return callback_data.startswith('champgrp_')
+
+
+def extract_group_index_from_champion_group(callback_data: str) -> int:
+    if not is_champion_group(callback_data):
+        raise ValueError('This is not champion group callback data')
+    return int(callback_data.removeprefix('champgrp_'))
+
+
+def create_champion_team(group_index: int, team_index: int) -> str:
+    return f'champteam_{group_index}_{team_index}'
+
+
+def is_champion_team(callback_data: str) -> bool:
+    return callback_data.startswith('champteam_')
+
+
+def extract_indexes_from_champion_team(callback_data: str) -> tuple[int, int]:
+    if not is_champion_team(callback_data):
+        raise ValueError('This is not champion team callback data')
+    group_index, team_index = callback_data.removeprefix('champteam_').split('_')
+    return int(group_index), int(team_index)
+
+
+# --- Спецставки: ставка на победителей групп --------------------------------------
+
+def create_group_overview() -> str:
+    return 'grp_over'
+
+
+def is_group_overview(callback_data: str) -> bool:
+    return callback_data == 'grp_over'
+
+
+def create_group_done() -> str:
+    return 'grp_done'
+
+
+def is_group_done(callback_data: str) -> bool:
+    return callback_data == 'grp_done'
+
+
+def create_group_pick(group_index: int) -> str:
+    return f'grppick_{group_index}'
+
+
+def is_group_pick(callback_data: str) -> bool:
+    return callback_data.startswith('grppick_')
+
+
+def extract_group_index_from_group_pick(callback_data: str) -> int:
+    if not is_group_pick(callback_data):
+        raise ValueError('This is not group pick callback data')
+    return int(callback_data.removeprefix('grppick_'))
+
+
+def create_group_team(group_index: int, team_index: int) -> str:
+    return f'grpteam_{group_index}_{team_index}'
+
+
+def is_group_team(callback_data: str) -> bool:
+    return callback_data.startswith('grpteam_')
+
+
+def extract_indexes_from_group_team(callback_data: str) -> tuple[int, int]:
+    if not is_group_team(callback_data):
+        raise ValueError('This is not group team callback data')
+    group_index, team_index = callback_data.removeprefix('grpteam_').split('_')
+    return int(group_index), int(team_index)

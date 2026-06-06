@@ -1,4 +1,5 @@
-from models import Event, EventResult, Bet, UserModel, EventType
+import constants
+from models import Event, EventResult, Bet, UserModel, EventType, Group, Tournament
 
 
 def event_to_dict(event: Event) -> dict:
@@ -128,4 +129,52 @@ def parse_user(user_dict: dict) -> UserModel:
         created_at=user_dict['created_at'],
         scores=user_dict['scores'],
         bets=list(map(lambda x: parse_bet(x), user_dict['bets'])),
+    )
+
+
+def group_to_dict(group: Group) -> dict:
+    return {'id': group.id, 'name': group.name, 'teams': list(group.teams)}
+
+
+def parse_group(group_dict: dict) -> Group:
+    return Group(
+        id=group_dict['id'],
+        name=group_dict['name'] if 'name' in group_dict else group_dict['id'],
+        teams=group_dict['teams'],
+    )
+
+
+def tournament_to_dict(tournament: Tournament) -> dict:
+    return {
+        '_id': constants.ACTIVE_TOURNAMENT_ID,
+        'name': tournament.name,
+        'created_at': tournament.created_at,
+        'groups': list(map(group_to_dict, tournament.groups)),
+        'champion_bet_open': tournament.champion_bet_open,
+        'group_bet_open': tournament.group_bet_open,
+        'champion_winner': tournament.champion_winner,
+        'group_winners': tournament.group_winners,
+        'champion_settled': tournament.champion_settled,
+        'group_settled': tournament.group_settled,
+    }
+
+
+def parse_tournament(tournament_dict: dict) -> Tournament:
+    # Back-compat: отсутствующий флаг -> False, отсутствующий winner -> None.
+    def flag(key: str) -> bool:
+        return tournament_dict[key] if key in tournament_dict else False
+
+    def optional(key: str):
+        return tournament_dict[key] if key in tournament_dict else None
+
+    return Tournament(
+        name=tournament_dict['name'],
+        created_at=tournament_dict['created_at'],
+        groups=list(map(parse_group, tournament_dict['groups'])),
+        champion_bet_open=flag('champion_bet_open'),
+        group_bet_open=flag('group_bet_open'),
+        champion_winner=optional('champion_winner'),
+        group_winners=optional('group_winners'),
+        champion_settled=flag('champion_settled'),
+        group_settled=flag('group_settled'),
     )

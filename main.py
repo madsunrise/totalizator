@@ -18,9 +18,10 @@ import datetime_utils
 import joker_utils
 import strings
 import telegram_utils
+import tournament_utils
 import utils
 from database import Database
-from models import Event, EventResult, Bet, Guessers, GuessedEvent, EventType, DetailedStatistic, UserModel
+from models import Event, EventResult, Bet, Guessers, GuessedEvent, EventType, DetailedStatistic, UserModel, Tournament
 
 locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
 bot = telebot.TeleBot(os.environ[constants.ENV_BOT_TOKEN])
@@ -361,6 +362,7 @@ def get_coming_events(message):
         return
     save_user_or_update_interaction(user=user)
     send_coming_events(user_id=user.id, chat_id=message.chat.id)
+    send_special_bets_hint(chat_id=message.chat.id, user_id=user.id)
 
 
 @bot.message_handler(commands=['clear_context'])
@@ -449,6 +451,284 @@ def get_detailed_analytics(message):
     bot.send_message(chat_id=message.chat.id, text=leaderboard_text)
     bot.send_message(chat_id=message.chat.id, text=detailed_statistic_text)
     bot.send_message(chat_id=message.chat.id, text=matches_statistic)
+
+
+# --- Спецставки: команды мейнтейнера (структура, открытие приёма) -------------------
+# ВАЖНО: эти обработчики команд должны быть зарегистрированы ВЫШЕ catch-all
+# @bot.message_handler(content_types=['text']), иначе многострочные /setup_tournament и
+# /set_group_winners попадут в текстовый обработчик. telebot матчит commands по первому
+# токену, поэтому многострочное тело команды безопасно.
+
+def is_betting_closed() -> bool:
+    # Единственное определение «турнир стартовал»: самый ранний матч уже начался.
+    # Общее для гардов открытия приёма и авто-закрытия.
+    start = tournament_utils.get_tournament_start(database.get_all_events())
+    return start is not None and start <= datetime_utils.get_utc_time()
+
+
+def check_can_open_bet() -> str | None:
+    if not database.tournament_exists():
+        return strings.NEED_STRUCTURE_FIRST
+    if is_betting_closed():
+        return strings.OPEN_TOO_LATE
+    return None
+
+
+def bet_status_text(is_open: bool) -> str:
+    if not is_open:
+        return 'не открывалась'
+    if is_betting_closed():
+        return 'открывалась, приём закрыт'
+    return 'открыта, приём идёт'
+
+
+def format_structure_confirmation(tournament: Tournament) -> str:
+    teams = tournament.all_teams()
+    lines = [f'{strings.OK}. Структура сохранена.']
+    lines.append(f'Групп: {tournament.group_count()}, команд всего: {len(teams)}.')
+    for group in tournament.groups:
+        lines.append(f'{group.name}: {", ".join(group.teams)}')
+    lines.append('')
+    lines.append(f'Кандидаты на чемпиона ({len(teams)}): {", ".join(teams)}')
+    return '\n'.join(lines)
+
+
+def format_tournament_info(tournament: Tournament) -> str:
+    lines = ['Структура турнира:']
+    for group in tournament.groups:
+        lines.append(f'{group.name}: {", ".join(group.teams)}')
+    lines.append('')
+    lines.append(f'Ставка на чемпиона: {bet_status_text(tournament.champion_bet_open)}')
+    lines.append(f'Ставка на победителей групп: {bet_status_text(tournament.group_bet_open)}')
+    start = tournament_utils.get_tournament_start(database.get_all_events())
+    if start is None:
+        lines.append('Приём ставок: открыт (матчи ещё не добавлены)')
+    elif is_betting_closed():
+        lines.append('Приём ставок: ЗАКРЫТ (турнир стартовал)')
+    else:
+        start_display = datetime_utils.to_display_string(start.astimezone(pytz.timezone('Europe/Moscow')))
+        lines.append(f'Приём ставок: открыт до старта первого матча ({start_display} МСК)')
+    lines.append(f'Чемпион (факт): {tournament.champion_winner or "—"}')
+    if tournament.group_winners:
+        gw = ', '.join(f'{group_id}: {team}' for group_id, team in tournament.group_winners.items())
+    else:
+        gw = '—'
+    lines.append(f'Победители групп (факт): {gw}')
+    return '\n'.join(lines)
+
+
+# Формат: одна группа на строку, "A: Канада, Мексика, США". Для перезаписи уже открытой
+# структуры добавить слово FORCE отдельной строкой (или сразу после команды).
+@bot.message_handler(commands=['setup_tournament'])
+def setup_tournament(message):
+    user = message.from_user
+    if not is_maintainer(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    if is_betting_closed():
+        bot.send_message(chat_id=message.chat.id, text=strings.SETUP_AFTER_START)
+        return
+    groups, errors = tournament_utils.parse_structure(message.text)
+    if errors:
+        bot.send_message(chat_id=message.chat.id, text='\n'.join(errors))
+        return
+    existing = database.get_tournament()
+    force = tournament_utils.has_force_token(message.text)
+    if existing is not None and (existing.champion_bet_open or existing.group_bet_open) and not force:
+        bot.send_message(chat_id=message.chat.id, text=strings.SETUP_NEEDS_FORCE)
+        return
+    tournament = Tournament(
+        name=existing.name if existing is not None else 'Турнир',
+        created_at=existing.created_at if existing is not None else datetime.now(timezone.utc),
+        groups=groups,
+        # Перезапись структуры сохраняет состояние ставок (флаги/факты/расчёт),
+        # чтобы правка опечатки не сбрасывала уже открытый приём и начисления.
+        champion_bet_open=existing.champion_bet_open if existing is not None else False,
+        group_bet_open=existing.group_bet_open if existing is not None else False,
+        champion_winner=existing.champion_winner if existing is not None else None,
+        group_winners=existing.group_winners if existing is not None else None,
+        champion_settled=existing.champion_settled if existing is not None else False,
+        group_settled=existing.group_settled if existing is not None else False,
+    )
+    database.save_tournament(tournament)
+    bot.send_message(chat_id=message.chat.id, text=format_structure_confirmation(tournament))
+
+
+@bot.message_handler(commands=['tournament_info'])
+def tournament_info(message):
+    user = message.from_user
+    if not is_maintainer(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    tournament = database.get_tournament()
+    if tournament is None:
+        bot.send_message(chat_id=message.chat.id, text=strings.STRUCTURE_NOT_SET)
+        return
+    bot.send_message(chat_id=message.chat.id, text=format_tournament_info(tournament))
+
+
+@bot.message_handler(commands=['open_champion_bet'])
+def open_champion_bet(message):
+    user = message.from_user
+    if not is_maintainer(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    error = check_can_open_bet()
+    if error:
+        bot.send_message(chat_id=message.chat.id, text=error)
+        return
+    tournament = database.get_tournament()
+    if tournament.champion_bet_open:
+        bot.send_message(chat_id=message.chat.id, text=strings.CHAMPION_BET_ALREADY_OPEN)
+        return
+    database.set_champion_bet_open(True)
+    bot.send_message(chat_id=message.chat.id, text=strings.OK)
+    teams_count = len(tournament.all_teams())
+    announcement = (f'🏆 Открыт приём ставок на ЧЕМПИОНА турнира!\n'
+                    f'Выбери победителя из {teams_count} команд. '
+                    f'Приём закроется автоматически со стартом первого матча.\n'
+                    f'За верный прогноз: +{tournament_utils.CHAMPION_BET_POINTS} очков.\n'
+                    f'Сделать прогноз: /champion')
+    bot.send_message(chat_id=get_target_chat_id(), text=announcement)
+
+
+@bot.message_handler(commands=['open_group_bet'])
+def open_group_bet(message):
+    user = message.from_user
+    if not is_maintainer(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    error = check_can_open_bet()
+    if error:
+        bot.send_message(chat_id=message.chat.id, text=error)
+        return
+    tournament = database.get_tournament()
+    if tournament.group_bet_open:
+        bot.send_message(chat_id=message.chat.id, text=strings.GROUP_BET_ALREADY_OPEN)
+        return
+    database.set_group_bet_open(True)
+    bot.send_message(chat_id=message.chat.id, text=strings.OK)
+    groups_count = tournament.group_count()
+    announcement = (f'🥇 Открыт приём ставок на ПОБЕДИТЕЛЕЙ ГРУПП!\n'
+                    f'Угадай, кто займёт 1-е место в каждой из {groups_count} групп. '
+                    f'+1 за каждую угаданную группу и +{tournament_utils.ALL_GROUPS_BONUS} бонусом, '
+                    f'если угаданы ВСЕ.\n'
+                    f'Приём закроется автоматически со стартом первого матча.\n'
+                    f'Сделать прогноз: /group_bets')
+    bot.send_message(chat_id=get_target_chat_id(), text=announcement)
+
+
+# Формат: "/set_champion Бразилия". Начисляет +10 угадавшим (единовременно, идемпотентно).
+@bot.message_handler(commands=['set_champion'])
+def set_champion(message):
+    user = message.from_user
+    if not is_maintainer(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    tournament = database.get_tournament()
+    if tournament is None:
+        bot.send_message(chat_id=message.chat.id, text=strings.STRUCTURE_NOT_SET)
+        return
+    if not tournament.champion_bet_open:
+        bot.send_message(chat_id=message.chat.id, text=strings.CHAMPION_NOT_OPENED)
+        return
+    # Рассчитывать можно только после закрытия приёма (старт первого матча): иначе
+    # участник может сменить выбор уже после начисления, и scores разойдётся с пиком.
+    if not is_betting_closed():
+        bot.send_message(chat_id=message.chat.id, text=strings.SETTLE_TOO_EARLY)
+        return
+    if tournament.champion_winner:
+        bot.send_message(chat_id=message.chat.id, text=strings.CHAMPION_ALREADY_SET % tournament.champion_winner)
+        return
+    team_input = message.text.removeprefix('/set_champion').strip()
+    if not team_input:
+        bot.send_message(chat_id=message.chat.id, text=strings.WRONG_MESSAGE_FORMAT_ERROR)
+        return
+    canonical = tournament.find_team(team_input)
+    if canonical is None:
+        bot.send_message(chat_id=message.chat.id, text=strings.UNKNOWN_TEAM % team_input)
+        return
+    database.set_champion_winner(canonical)
+    winners = []
+    for user_model in database.get_all_users():
+        pick = database.get_champion_bet(user_model.id)
+        if tournament_utils.calculate_champion_bet_points(pick, canonical) <= 0:
+            continue
+        # Per-user одноразовый guard: +10 не начислится дважды даже при повторном запуске/перезапуске.
+        if not database.claim_reminder(f'settle:champion:{user_model.id}'):
+            continue
+        database.add_scores_to_user(user_id=user_model.id, amount=tournament_utils.CHAMPION_BET_POINTS)
+        winners.append(user_model)
+    database.mark_champion_settled()
+    bot.send_message(chat_id=message.chat.id, text=strings.OK)
+
+    text = f'🏆 Чемпион турнира — {canonical}!\n'
+    if winners:
+        text += f'Угадал(и) чемпиона (+{tournament_utils.CHAMPION_BET_POINTS}):\n'
+        text += '\n'.join(w.get_full_name() for w in winners)
+    else:
+        text += 'Чемпиона не угадал никто.'
+    text += '\n-----\n' + get_leaderboard_text()
+    telegram_utils.safe_send_message(bot=bot, chat_id=get_target_chat_id(), text=text)
+
+
+# Формат (по группе на строку): "/set_group_winners\nA: США\nB: ...".
+# Начисляет +1 за группу и +10 бонусом за все угаданные (единовременно, идемпотентно).
+@bot.message_handler(commands=['set_group_winners'])
+def set_group_winners(message):
+    user = message.from_user
+    if not is_maintainer(user=user):
+        return
+    save_user_or_update_interaction(user=user)
+    tournament = database.get_tournament()
+    if tournament is None:
+        bot.send_message(chat_id=message.chat.id, text=strings.STRUCTURE_NOT_SET)
+        return
+    if not tournament.group_bet_open:
+        bot.send_message(chat_id=message.chat.id, text=strings.GROUP_NOT_OPENED)
+        return
+    # Рассчитывать можно только после закрытия приёма (старт первого матча): иначе
+    # участник может сменить выбор уже после начисления, и scores разойдётся с пиком.
+    if not is_betting_closed():
+        bot.send_message(chat_id=message.chat.id, text=strings.SETTLE_TOO_EARLY)
+        return
+    if tournament.group_winners:
+        bot.send_message(chat_id=message.chat.id, text=strings.GROUP_WINNERS_ALREADY_SET)
+        return
+    winners_map, errors = tournament_utils.parse_group_winners(message.text, tournament)
+    if errors:
+        bot.send_message(chat_id=message.chat.id, text='\n'.join(errors))
+        return
+    database.set_group_winners(winners_map)
+    total = tournament.group_count()
+    results = []  # (user_model, GroupBetResult)
+    for user_model in database.get_all_users():
+        picks = database.get_group_champion_bets(user_model.id)
+        if not picks:
+            continue
+        result = tournament_utils.calculate_group_bet_points(picks, winners_map, total_groups=total)
+        if result.total_points > 0 and database.claim_reminder(f'settle:groups:{user_model.id}'):
+            database.add_scores_to_user(user_id=user_model.id, amount=result.total_points)
+        results.append((user_model, result))
+    database.mark_group_settled()
+    bot.send_message(chat_id=message.chat.id, text=strings.OK)
+
+    lines = ['🥇 Победители групп зафиксированы:']
+    for group in tournament.groups:
+        lines.append(f'{group.name} — {winners_map.get(group.id, "—")}')
+    lines.append('-----')
+    if results:
+        lines.append('Результаты прогнозов:')
+        results.sort(key=lambda x: x[1].correct_count, reverse=True)
+        for user_model, result in results:
+            mark = ' 🎯' if result.all_correct else ''
+            lines.append(f'{user_model.get_full_name()}: {result.correct_count}/{result.total_groups} '
+                         f'(+{result.total_points}){mark}')
+    else:
+        lines.append('Никто не делал ставку на группы.')
+    lines.append('-----')
+    lines.append(get_leaderboard_text())
+    telegram_utils.safe_send_message(bot=bot, chat_id=get_target_chat_id(), text='\n'.join(lines))
 
 
 def get_user_bets_with_events(user_id: int) -> list[tuple[Bet, Event]]:
@@ -813,6 +1093,30 @@ def callback_query(call):
             bot.send_message(chat_id=chat_id, text=text)
             send_my_bets_message(chat_id=chat_id, user_id=user.id)
 
+        elif callback_data_utils.is_champion_open(call.data):
+            send_champion_bet_message(chat_id=chat_id, user_id=user.id, message_id=call.message.message_id)
+        elif callback_data_utils.is_champion_group(call.data):
+            group_index = callback_data_utils.extract_group_index_from_champion_group(call.data)
+            send_champion_team_menu(chat_id=chat_id, user_id=user.id, group_index=group_index,
+                                    message_id=call.message.message_id)
+        elif callback_data_utils.is_champion_team(call.data):
+            group_index, team_index = callback_data_utils.extract_indexes_from_champion_team(call.data)
+            process_champion_pick(user_id=user.id, chat_id=chat_id, message_id=call.message.message_id,
+                                  group_index=group_index, team_index=team_index)
+        elif callback_data_utils.is_group_overview(call.data):
+            send_group_bets_overview_message(chat_id=chat_id, user_id=user.id, message_id=call.message.message_id)
+        elif callback_data_utils.is_group_done(call.data):
+            send_group_bets_overview_message(chat_id=chat_id, user_id=user.id, message_id=call.message.message_id,
+                                             as_summary=True)
+        elif callback_data_utils.is_group_pick(call.data):
+            group_index = callback_data_utils.extract_group_index_from_group_pick(call.data)
+            send_group_team_menu(chat_id=chat_id, user_id=user.id, group_index=group_index,
+                                 message_id=call.message.message_id)
+        elif callback_data_utils.is_group_team(call.data):
+            group_index, team_index = callback_data_utils.extract_indexes_from_group_team(call.data)
+            process_group_pick(user_id=user.id, chat_id=chat_id, message_id=call.message.message_id,
+                               group_index=group_index, team_index=team_index)
+
 
     except Exception as e:
         handle_exception(e=e, user=user, chat_id=chat_id)
@@ -841,6 +1145,278 @@ def process_who_will_go_through_bet(user_id: int, chat_id: int, message_id: int,
         text=msg
     )
     send_coming_events(user_id=user_id, chat_id=chat_id, send_error_if_all_bets_already_make=False)
+
+
+# --- Спецставки: интерфейс участника (кнопочные мастера) ---------------------------
+# Полностью на inline-кнопках, current_event НЕ используют — поэтому не конфликтуют
+# с единственным текстовым обработчиком get_text_messages. Состояние = сохранённые поля
+# champion_bet / group_champion_bets, поэтому мастер резюмируется и поддерживает частичное
+# заполнение.
+
+def _chunked(items: list, size: int) -> list:
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def send_or_edit(chat_id: int, text: str, reply_markup=None, message_id: int | None = None):
+    if message_id is not None:
+        try:
+            bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=reply_markup)
+            return
+        except Exception as e:
+            logging.exception(e)
+    bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+
+
+def is_champion_bet_acceptable(tournament: Tournament | None) -> bool:
+    return tournament is not None and tournament.champion_bet_open and not is_betting_closed()
+
+
+def is_group_bet_acceptable(tournament: Tournament | None) -> bool:
+    return tournament is not None and tournament.group_bet_open and not is_betting_closed()
+
+
+def count_valid_group_picks(tournament: Tournament, picks: dict) -> int:
+    # Учитываем только выборы для существующих групп с командой из этой группы (игнор устаревших).
+    valid = 0
+    for group in tournament.groups:
+        team = picks.get(group.id)
+        if team and tournament.find_team_in_group(group.id, team) is not None:
+            valid += 1
+    return valid
+
+
+def format_group_picks_summary(tournament: Tournament, picks: dict) -> str:
+    parts = []
+    for group in tournament.groups:
+        team = picks.get(group.id)
+        parts.append(f'{group.name} — {team}' if team else f'⬜ {group.name}')
+    return ', '.join(parts)
+
+
+# ----- Чемпион турнира -----
+
+def send_champion_bet_message(chat_id: int, user_id: int, message_id: int | None = None):
+    tournament = database.get_tournament()
+    pick = database.get_champion_bet(user_id) if tournament is not None else None
+    if tournament is None or not tournament.champion_bet_open:
+        text = strings.SPECIAL_BET_NOT_OPEN_YET
+        if pick:
+            text += f'\n\nТвой выбор чемпиона: {pick}.'
+        send_or_edit(chat_id, text, message_id=message_id)
+        return
+    if is_betting_closed():
+        text = strings.SPECIAL_BET_CLOSED
+        if pick:
+            text += f'\n\nТвой выбор чемпиона: {pick}.'
+        send_or_edit(chat_id, text, message_id=message_id)
+        return
+    if pick:
+        header = (f'Твой выбор чемпиона: {pick}. Можно изменить до старта турнира.\n'
+                  f'Выбери группу, из которой будет чемпион:')
+    else:
+        header = 'Выбери группу, из которой будет чемпион турнира:'
+    markup = InlineKeyboardMarkup()
+    for row in _chunked(list(enumerate(tournament.groups)), 4):
+        buttons = []
+        for group_index, group in row:
+            label = group.name
+            if pick and tournament.find_team_in_group(group.id, pick) is not None:
+                label = f'✅ {group.name}'
+            buttons.append(InlineKeyboardButton(
+                label, callback_data=callback_data_utils.create_champion_group(group_index)))
+        markup.row(*buttons)
+    send_or_edit(chat_id, header, reply_markup=markup, message_id=message_id)
+
+
+def send_champion_team_menu(chat_id: int, user_id: int, group_index: int, message_id: int | None = None):
+    tournament = database.get_tournament()
+    if not is_champion_bet_acceptable(tournament) or group_index < 0 or group_index >= len(tournament.groups):
+        send_champion_bet_message(chat_id, user_id, message_id=message_id)
+        return
+    group = tournament.groups[group_index]
+    pick = database.get_champion_bet(user_id)
+    markup = InlineKeyboardMarkup()
+    for team_index, team in enumerate(group.teams):
+        label = f'✅ {team}' if (pick and tournament_utils.equals_team(pick, team)) else team
+        markup.add(InlineKeyboardButton(
+            label, callback_data=callback_data_utils.create_champion_team(group_index, team_index)))
+    markup.add(InlineKeyboardButton(
+        '⬅️ Назад к группам', callback_data=callback_data_utils.create_champion_open()))
+    send_or_edit(chat_id, f'Группа {group.name}. Выбери чемпиона турнира:', reply_markup=markup, message_id=message_id)
+
+
+def process_champion_pick(user_id: int, chat_id: int, message_id: int, group_index: int, team_index: int):
+    tournament = database.get_tournament()
+    if not is_champion_bet_acceptable(tournament):
+        send_champion_bet_message(chat_id, user_id, message_id=message_id)
+        return
+    if group_index < 0 or group_index >= len(tournament.groups):
+        send_champion_bet_message(chat_id, user_id, message_id=message_id)
+        return
+    group = tournament.groups[group_index]
+    if team_index < 0 or team_index >= len(group.teams):
+        send_champion_team_menu(chat_id, user_id, group_index, message_id=message_id)
+        return
+    team = group.teams[team_index]
+    database.set_champion_bet(user_id, team)
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton('✏️ Изменить', callback_data=callback_data_utils.create_champion_open()))
+    send_or_edit(chat_id, f'Чемпион турнира: {team} ✅. Изменить можно до старта турнира.',
+                 reply_markup=markup, message_id=message_id)
+
+
+# ----- Победители групп -----
+
+def send_group_bets_overview_message(chat_id: int, user_id: int, message_id: int | None = None,
+                                     as_summary: bool = False):
+    tournament = database.get_tournament()
+    picks = database.get_group_champion_bets(user_id) if tournament is not None else {}
+    if tournament is None or not tournament.group_bet_open:
+        send_or_edit(chat_id, strings.SPECIAL_BET_NOT_OPEN_YET, message_id=message_id)
+        return
+    if is_betting_closed():
+        text = strings.SPECIAL_BET_CLOSED + '\n\n' + format_group_picks_summary(tournament, picks)
+        send_or_edit(chat_id, text, message_id=message_id)
+        return
+    filled = count_valid_group_picks(tournament, picks)
+    total = tournament.group_count()
+    if as_summary:
+        header = (f'Готово. Заполнено {filled}/{total}.\n'
+                  f'{format_group_picks_summary(tournament, picks)}\n\n'
+                  f'Можно изменить до старта турнира. Выбери группу:')
+    else:
+        header = (f'Победители групп: заполнено {filled}/{total}.\n'
+                  f'+1 за каждую угаданную группу. Бонус +{tournament_utils.ALL_GROUPS_BONUS}, если угаданы ВСЕ.\n'
+                  f'Выбери группу:')
+    markup = InlineKeyboardMarkup()
+    for row in _chunked(list(enumerate(tournament.groups)), 4):
+        buttons = []
+        for group_index, group in row:
+            chosen = picks.get(group.id)
+            valid = chosen and tournament.find_team_in_group(group.id, chosen) is not None
+            label = f'✅ {group.name}' if valid else f'⬜ {group.name}'
+            buttons.append(InlineKeyboardButton(
+                label, callback_data=callback_data_utils.create_group_pick(group_index)))
+        markup.row(*buttons)
+    markup.add(InlineKeyboardButton('Готово', callback_data=callback_data_utils.create_group_done()))
+    send_or_edit(chat_id, header, reply_markup=markup, message_id=message_id)
+
+
+def send_group_team_menu(chat_id: int, user_id: int, group_index: int, message_id: int | None = None):
+    tournament = database.get_tournament()
+    if not is_group_bet_acceptable(tournament) or group_index < 0 or group_index >= len(tournament.groups):
+        send_group_bets_overview_message(chat_id, user_id, message_id=message_id)
+        return
+    group = tournament.groups[group_index]
+    chosen = database.get_group_champion_bets(user_id).get(group.id)
+    markup = InlineKeyboardMarkup()
+    for team_index, team in enumerate(group.teams):
+        label = f'✅ {team}' if (chosen and tournament_utils.equals_team(chosen, team)) else team
+        markup.add(InlineKeyboardButton(
+            label, callback_data=callback_data_utils.create_group_team(group_index, team_index)))
+    markup.add(InlineKeyboardButton('⬅️ К группам', callback_data=callback_data_utils.create_group_overview()))
+    send_or_edit(chat_id, f'Группа {group.name}. Кто станет победителем группы?',
+                 reply_markup=markup, message_id=message_id)
+
+
+def process_group_pick(user_id: int, chat_id: int, message_id: int, group_index: int, team_index: int):
+    tournament = database.get_tournament()
+    if not is_group_bet_acceptable(tournament):
+        send_group_bets_overview_message(chat_id, user_id, message_id=message_id)
+        return
+    if group_index < 0 or group_index >= len(tournament.groups):
+        send_group_bets_overview_message(chat_id, user_id, message_id=message_id)
+        return
+    group = tournament.groups[group_index]
+    if team_index < 0 or team_index >= len(group.teams):
+        send_group_team_menu(chat_id, user_id, group_index, message_id=message_id)
+        return
+    team = group.teams[team_index]
+    database.set_group_champion_bet(user_id, group.id, team)
+    send_group_bets_overview_message(chat_id, user_id, message_id=message_id)
+
+
+# ----- Интеграция в /coming_events и /my_bets -----
+
+def send_special_bets_hint(chat_id: int, user_id: int):
+    # Отдельным сообщением показываем спецставки, ПОКА хотя бы одна открыта и принимается.
+    tournament = database.get_tournament()
+    if tournament is None:
+        return
+    champ_ok = is_champion_bet_acceptable(tournament)
+    group_ok = is_group_bet_acceptable(tournament)
+    if not champ_ok and not group_ok:
+        return
+    lines = ['Спецпрогнозы:']
+    markup = InlineKeyboardMarkup()
+    if champ_ok:
+        pick = database.get_champion_bet(user_id)
+        if pick:
+            lines.append(f'🏆 Чемпион турнира: {pick} (можно изменить)')
+            markup.add(InlineKeyboardButton(
+                '🏆 Изменить чемпиона', callback_data=callback_data_utils.create_champion_open()))
+        else:
+            lines.append('🏆 Чемпион турнира — приём открыт, ты ещё не выбрал.')
+            markup.add(InlineKeyboardButton(
+                '🏆 Выбрать чемпиона', callback_data=callback_data_utils.create_champion_open()))
+    if group_ok:
+        picks = database.get_group_champion_bets(user_id)
+        filled = count_valid_group_picks(tournament, picks)
+        lines.append(f'🥇 Победители групп — заполнено {filled}/{tournament.group_count()}.')
+        markup.add(InlineKeyboardButton(
+            '🥇 Победители групп', callback_data=callback_data_utils.create_group_overview()))
+    bot.send_message(chat_id=chat_id, text='\n'.join(lines), reply_markup=markup)
+
+
+def format_special_bets_section(tournament: Tournament | None, user_id: int) -> str:
+    # Read-only текст спецпрогнозов для /my_bets. '' если показывать нечего.
+    if tournament is None:
+        return ''
+    lines = []
+    if tournament.champion_bet_open:
+        pick = database.get_champion_bet(user_id)
+        line = f'🏆 Чемпион: {pick}' if pick else '🏆 Чемпион: не выбран'
+        if tournament.champion_winner:
+            points = tournament_utils.calculate_champion_bet_points(pick, tournament.champion_winner)
+            line += f' (факт: {tournament.champion_winner}, +{points})'
+        lines.append(line)
+    if tournament.group_bet_open:
+        picks = database.get_group_champion_bets(user_id)
+        filled = count_valid_group_picks(tournament, picks)
+        line = (f'🥇 Победители групп ({filled}/{tournament.group_count()}): '
+                f'{format_group_picks_summary(tournament, picks)}')
+        if tournament.group_winners:
+            result = tournament_utils.calculate_group_bet_points(
+                picks, tournament.group_winners, total_groups=tournament.group_count())
+            line += f'\nУгадано {result.correct_count}/{result.total_groups}, начислено +{result.total_points}'
+        lines.append(line)
+    if not lines:
+        return ''
+    return 'Спецпрогнозы:\n' + '\n'.join(lines)
+
+
+@bot.message_handler(commands=['champion'])
+def champion_command(message):
+    user = message.from_user
+    if not is_club_member(user=user):
+        return
+    if message.chat.type != 'private':
+        bot.send_message(chat_id=message.chat.id, text=strings.WRITE_TO_PRIVATE_MESSAGES)
+        return
+    save_user_or_update_interaction(user=user)
+    send_champion_bet_message(chat_id=message.chat.id, user_id=user.id)
+
+
+@bot.message_handler(commands=['group_bets'])
+def group_bets_command(message):
+    user = message.from_user
+    if not is_club_member(user=user):
+        return
+    if message.chat.type != 'private':
+        bot.send_message(chat_id=message.chat.id, text=strings.WRITE_TO_PRIVATE_MESSAGES)
+        return
+    save_user_or_update_interaction(user=user)
+    send_group_bets_overview_message(chat_id=message.chat.id, user_id=user.id)
 
 
 @bot.message_handler(content_types=['text'])
@@ -1056,8 +1632,20 @@ def send_coming_events(user_id: int, chat_id: int, send_error_if_all_bets_alread
 def send_my_bets_message(chat_id: int, user_id: int):
     bets_with_events = get_user_bets_with_events(user_id=user_id)
     status_text = joker_utils.get_joker_status_text(get_joker_status_for_user(user_id=user_id))
+    tournament = database.get_tournament()
+    special_section = format_special_bets_section(tournament, user_id)
     if len(bets_with_events) == 0:
-        bot.send_message(chat_id=chat_id, text=f'{status_text}\n\nПока ничего нет. Начни с команды /coming_events.')
+        base = f'{status_text}\n\nПока ничего нет. Начни с команды /coming_events.'
+        if special_section:
+            base += f'\n\n{special_section}'
+        markup = InlineKeyboardMarkup()
+        if is_champion_bet_acceptable(tournament):
+            markup.add(InlineKeyboardButton(
+                '🏆 Чемпион турнира', callback_data=callback_data_utils.create_champion_open()))
+        if is_group_bet_acceptable(tournament):
+            markup.add(InlineKeyboardButton(
+                '🥇 Победители групп', callback_data=callback_data_utils.create_group_overview()))
+        bot.send_message(chat_id=chat_id, text=base, reply_markup=markup if markup.keyboard else None)
         return
 
     bets_played = list(filter(lambda x: x[1].result is not None, bets_with_events))
@@ -1132,6 +1720,14 @@ def send_my_bets_message(chat_id: int, user_id: int):
                     callback_data=callback_data_utils.create_remove_joker_button()
                 )
             )
+    if special_section:
+        text += f'\n\n{special_section}'
+    if is_champion_bet_acceptable(tournament):
+        reply_markup.add(InlineKeyboardButton(
+            '🏆 Чемпион турнира', callback_data=callback_data_utils.create_champion_open()))
+    if is_group_bet_acceptable(tournament):
+        reply_markup.add(InlineKeyboardButton(
+            '🥇 Победители групп', callback_data=callback_data_utils.create_group_overview()))
     bot.send_message(chat_id=chat_id, text=text.strip(), reply_markup=reply_markup)
 
 
@@ -1415,6 +2011,7 @@ def do_every_ten_minutes():
     check_playoff_joker_reminders()
     check_tournament_end_joker_reminders()
     check_for_burned_jokers_after_playoff_start()
+    check_special_bets_close()
 
 
 scheduler_thread = threading.Thread(target=run_scheduler)
@@ -1658,6 +2255,29 @@ def check_for_burned_jokers_after_playoff_start():
         text = (f'Стартовал плей-офф. Сгорело джокеров: {status.will_burn_at_playoff_start}.\n\n'
                 f'{joker_utils.get_joker_status_text(status)}')
         send_joker_reminder_message(chat_id=user_model.id, text=text)
+
+
+def check_special_bets_close():
+    # Авто-закрытие спецставок при старте первого матча: разовое «вы опоздали» тем,
+    # кто не сделал открытую ставку. Сам приём закрывается «по часам» (is_betting_closed),
+    # здесь только разовая рассылка. Идемпотентно через claim_reminder (как burned-at-playoff).
+    events = database.get_all_events()
+    if len(events) == 0:
+        return
+    start = tournament_utils.get_tournament_start(events)
+    if start is None or datetime_utils.get_utc_time() < start:
+        return
+    tournament = database.get_tournament()
+    if tournament is None:
+        return
+    if tournament.champion_bet_open and database.claim_reminder(f'special_bet_late:champion:{start.isoformat()}'):
+        for user_model in database.get_all_users():
+            if not database.get_champion_bet(user_model.id):
+                send_joker_reminder_message(chat_id=user_model.id, text=strings.CHAMPION_BET_MISSED)
+    if tournament.group_bet_open and database.claim_reminder(f'special_bet_late:group:{start.isoformat()}'):
+        for user_model in database.get_all_users():
+            if not database.get_group_champion_bets(user_model.id):
+                send_joker_reminder_message(chat_id=user_model.id, text=strings.GROUP_BET_MISSED)
 
 
 def check_for_unfinished_events():

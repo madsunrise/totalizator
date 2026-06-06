@@ -5,7 +5,7 @@ from typing import Any
 
 import constants
 import mapper
-from models import Event, Bet
+from models import Event, Bet, Tournament
 
 
 class Database:
@@ -15,6 +15,7 @@ class Database:
         self.user_collection = self.db['users']
         self.event_collection = self.db['events']
         self.reminder_collection = self.db['joker_reminders']
+        self.tournament_collection = self.db['tournament']
 
     def check_if_user_exists(self, user_id: int, raise_error: bool = False) -> bool:
         result = self.get_user(user_id=user_id)
@@ -197,3 +198,71 @@ class Database:
             upsert=True,
         )
         return result.upserted_id is not None
+
+    # --- Структура турнира (singleton-документ для спецставок) --------------------
+
+    def get_tournament(self) -> Tournament | None:
+        tournament_dict = self.tournament_collection.find_one({'_id': constants.ACTIVE_TOURNAMENT_ID})
+        if tournament_dict:
+            return mapper.parse_tournament(dict(tournament_dict))
+        return None
+
+    def tournament_exists(self) -> bool:
+        return self.get_tournament() is not None
+
+    def save_tournament(self, tournament: Tournament):
+        # Upsert единственного активного документа турнира.
+        tournament_dict = mapper.tournament_to_dict(tournament)
+        self.tournament_collection.replace_one(
+            {'_id': constants.ACTIVE_TOURNAMENT_ID},
+            tournament_dict,
+            upsert=True,
+        )
+
+    def set_tournament_attribute(self, key: str, value: Any):
+        self.tournament_collection.update_one(
+            {'_id': constants.ACTIVE_TOURNAMENT_ID},
+            {'$set': {key: value}},
+        )
+
+    def set_champion_bet_open(self, is_open: bool):
+        self.set_tournament_attribute('champion_bet_open', is_open)
+
+    def set_group_bet_open(self, is_open: bool):
+        self.set_tournament_attribute('group_bet_open', is_open)
+
+    def set_champion_winner(self, team: str):
+        self.set_tournament_attribute('champion_winner', team)
+
+    def set_group_winners(self, winners: dict):
+        self.set_tournament_attribute('group_winners', winners)
+
+    def mark_champion_settled(self):
+        self.set_tournament_attribute('champion_settled', True)
+
+    def mark_group_settled(self):
+        self.set_tournament_attribute('group_settled', True)
+
+    # --- Спецставки пользователя (поверх generic get/set/delete_user_attribute) ----
+
+    def get_champion_bet(self, user_id: int) -> str | None:
+        return self.get_user_attribute(user_id=user_id, key='champion_bet')
+
+    def set_champion_bet(self, user_id: int, team: str):
+        # Храним каноническое написание из структуры.
+        self.set_user_attribute(user_id=user_id, key='champion_bet', value=team)
+
+    def clear_champion_bet(self, user_id: int):
+        self.delete_user_attribute(user_id=user_id, key='champion_bet')
+
+    def get_group_champion_bets(self, user_id: int) -> dict:
+        return self.get_user_attribute(user_id=user_id, key='group_champion_bets') or {}
+
+    def set_group_champion_bet(self, user_id: int, group_id: str, team: str):
+        # Read-modify-write словаря, как add_bet для массива bets.
+        current = self.get_user_attribute(user_id=user_id, key='group_champion_bets') or {}
+        current[group_id] = team
+        self.set_user_attribute(user_id=user_id, key='group_champion_bets', value=current)
+
+    def clear_group_champion_bets(self, user_id: int):
+        self.delete_user_attribute(user_id=user_id, key='group_champion_bets')
