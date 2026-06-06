@@ -1,7 +1,6 @@
+import pytz
 from datetime import datetime, timezone
 from enum import Enum
-
-import pytz
 
 import datetime_utils
 
@@ -10,7 +9,8 @@ class EventResult:
     def __init__(self, team_1_scores: int, team_2_scores: int, team_1_has_gone_through: bool | None):
         self.team_1_scores = team_1_scores
         self.team_2_scores = team_2_scores
-        self.team_1_has_gone_through = team_1_has_gone_through  # указываем None для матчах типа SIMPLE.
+        self.team_1_has_gone_through = team_1_has_gone_through
+        # Для GROUP_STAGE и PLAY_OFF_FIRST_MATCH указываем None (исход по итогу самого матча не определяется).
         # В матчах PLAY_OFF_SINGLE_MATCH и PLAY_OFF_SECOND_MATCH обязательно будет или True, или False.
 
     def is_draw(self) -> bool:
@@ -18,9 +18,10 @@ class EventResult:
 
 
 class EventType(Enum):
-    SIMPLE = 1  # Групповые этапы, а также первый матч в плей-офф, когда их два.
+    GROUP_STAGE = 1  # Матчи группового этапа.
     PLAY_OFF_SINGLE_MATCH = 2  # Единственный матч в плей-офф (когда нет ответного матча – например, финал).
     PLAY_OFF_SECOND_MATCH = 3  # Второй матч в плей-офф, когда их два.
+    PLAY_OFF_FIRST_MATCH = 4  # Первый матч в плей-офф, когда их два. Исход (кто проходит) определяется по сумме двух матчей.
 
 
 class Event:
@@ -59,6 +60,9 @@ class Event:
     def is_in_progress(self) -> bool:
         return self.is_started() and not self.is_finished()
 
+    def decides_who_goes_through(self) -> bool:
+        return self.event_type in (EventType.PLAY_OFF_SINGLE_MATCH, EventType.PLAY_OFF_SECOND_MATCH)
+
 
 class Bet:
 
@@ -69,16 +73,18 @@ class Bet:
                  team_2_scores: int,
                  team_1_will_go_through: bool | None,
                  created_at: datetime,
+                 is_joker: bool = False,
                  ):
         self.user_id = user_id
         self.event_uuid = event_uuid
         self.team_1_scores = team_1_scores
         self.team_2_scores = team_2_scores
         self.team_1_will_go_through = team_1_will_go_through
-        # указываем None для матчах типа SIMPLE. В матчах PLAY_OFF_SINGLE_MATCH и PLAY_OFF_SECOND_MATCH
-        # обязательно будет или True, или False. Только если юзер не поставит на ничью и проигнорирует кнопку с тем,
-        # кто пройдёт дальше (тогда будет None).
+        # Для GROUP_STAGE и PLAY_OFF_FIRST_MATCH всегда None — проход определяется не текущим матчем.
+        # В матчах PLAY_OFF_SINGLE_MATCH и PLAY_OFF_SECOND_MATCH обязательно будет или True, или False.
+        # Только если юзер поставил на ничью и проигнорировал кнопку с тем, кто пройдёт дальше, будет None.
         self.created_at = created_at
+        self.is_joker = is_joker
 
     def is_bet_on_draw(self) -> bool:
         return self.team_1_scores == self.team_2_scores

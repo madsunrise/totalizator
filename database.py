@@ -1,8 +1,7 @@
 import os
 from datetime import datetime
-from typing import Any
-
 from pymongo import MongoClient
+from typing import Any
 
 import constants
 import mapper
@@ -15,6 +14,7 @@ class Database:
         self.db = self.client[os.environ[constants.ENV_DATABASE_NAME]]
         self.user_collection = self.db['users']
         self.event_collection = self.db['events']
+        self.reminder_collection = self.db['joker_reminders']
 
     def check_if_user_exists(self, user_id: int, raise_error: bool = False) -> bool:
         result = self.get_user(user_id=user_id)
@@ -187,3 +187,13 @@ class Database:
     def delete_user_attribute(self, user_id: int, key: str):
         self.check_if_user_exists(user_id=user_id, raise_error=True)
         self.user_collection.update_one({'_id': user_id}, {'$unset': {key: ''}})
+
+    def claim_reminder(self, key: str) -> bool:
+        # Атомарно "застолбить" разовое напоминание по ключу. Возвращает True только первому вызывающему.
+        # Идемпотентно при дрейфе планировщика: повторные тики по тому же ключу вернут False и не пошлют дубль.
+        result = self.reminder_collection.update_one(
+            {'_id': key},
+            {'$setOnInsert': {'sent_at': datetime.now()}},
+            upsert=True,
+        )
+        return result.upserted_id is not None

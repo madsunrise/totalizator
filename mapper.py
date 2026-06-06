@@ -31,7 +31,7 @@ def parse_event(event_dict: dict) -> Event:
             team_2_scores=result_dict['team_2'],
             team_1_has_gone_through=team_1_has_gone_through
         )
-    event_type = EventType.SIMPLE
+    event_type = EventType.GROUP_STAGE
     if 'is_playoff' in event_dict:  # deprecated, can be removed in future
         event_type = EventType.PLAY_OFF_SECOND_MATCH
     elif 'type' in event_dict:
@@ -49,12 +49,14 @@ def parse_event(event_dict: dict) -> Event:
 
 def event_type_to_int(event_type: EventType) -> int:
     match event_type:
-        case EventType.SIMPLE:
+        case EventType.GROUP_STAGE:
             return 1
         case EventType.PLAY_OFF_SINGLE_MATCH:
             return 2
         case EventType.PLAY_OFF_SECOND_MATCH:
             return 3
+        case EventType.PLAY_OFF_FIRST_MATCH:
+            return 4
         case _:
             raise ValueError(f'Unknown enum value: {event_type}')
 
@@ -62,11 +64,13 @@ def event_type_to_int(event_type: EventType) -> int:
 def parse_event_type(value: int) -> EventType:
     match value:
         case 1:
-            return EventType.SIMPLE
+            return EventType.GROUP_STAGE
         case 2:
             return EventType.PLAY_OFF_SINGLE_MATCH
         case 3:
             return EventType.PLAY_OFF_SECOND_MATCH
+        case 4:
+            return EventType.PLAY_OFF_FIRST_MATCH
         case _:
             raise ValueError(f'Unknown int value: {value}')
 
@@ -79,6 +83,7 @@ def bet_to_dict(bet: Bet) -> dict:
         'team_2_scores': bet.team_2_scores,
         'team_1_will_go_through': bet.team_1_will_go_through,
         'created_at': bet.created_at,
+        'is_joker': bet.is_joker,
     }
 
 
@@ -86,6 +91,9 @@ def parse_bet(bet_dict: dict) -> Bet:
     team_1_will_go_through = None
     if 'team_1_will_go_through' in bet_dict:
         team_1_will_go_through = bet_dict['team_1_will_go_through']
+    is_joker = False
+    if 'is_joker' in bet_dict:
+        is_joker = bet_dict['is_joker']
     return Bet(
         user_id=bet_dict['user_id'],
         event_uuid=bet_dict['event_uuid'],
@@ -93,6 +101,7 @@ def parse_bet(bet_dict: dict) -> Bet:
         team_2_scores=bet_dict['team_2_scores'],
         team_1_will_go_through=team_1_will_go_through,
         created_at=bet_dict['created_at'],
+        is_joker=is_joker,
     )
 
 

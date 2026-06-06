@@ -2,20 +2,20 @@ import csv
 import locale
 import logging
 import os
-import threading
-import time
-import traceback
-from datetime import datetime, timezone, timedelta
-
 import pytz
 import requests
 import schedule
 import telebot
+import threading
+import time
+import traceback
+from datetime import datetime, timezone, timedelta
 from telebot.types import User, InlineKeyboardMarkup, InlineKeyboardButton
 
 import callback_data_utils
 import constants
 import datetime_utils
+import joker_utils
 import strings
 import telegram_utils
 import utils
@@ -25,6 +25,7 @@ from models import Event, EventResult, Bet, Guessers, GuessedEvent, EventType, D
 locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
 bot = telebot.TeleBot(os.environ[constants.ENV_BOT_TOKEN])
 database = Database()
+joker_write_lock = threading.Lock()
 logging.basicConfig(filename='totalizator.log', encoding='utf-8', level=logging.INFO)
 
 
@@ -39,7 +40,8 @@ def start(message):
 
 
 # Service method
-# Формат сообщения для группового матча либо первого матча в плей-офф: "Германия; Шотландия; 14.06.2024 22:00; simple"
+# Формат сообщения для матча группового этапа: "Германия; Шотландия; 14.06.2024 22:00; group"
+# Формат сообщения для первого матча в плей-офф (двухматчевая пара): "Германия; Шотландия; 14.06.2024 22:00; playoff_first_match"
 # Формат сообщения для ответного (второго) матча в плей-офф: "Германия; Шотландия; 14.06.2024 22:00; playoff_second_match"
 # Формат сообщения для матча на вылет (например, финал): "Германия; Шотландия; 14.06.2024 22:00; playoff_single"
 @bot.message_handler(commands=['add_event'])
@@ -64,8 +66,10 @@ def add_event(message):
         event_type = EventType.PLAY_OFF_SINGLE_MATCH
     elif split[3] == 'playoff_second_match':
         event_type = EventType.PLAY_OFF_SECOND_MATCH
-    elif split[3] == 'simple':
-        event_type = EventType.SIMPLE
+    elif split[3] == 'playoff_first_match':
+        event_type = EventType.PLAY_OFF_FIRST_MATCH
+    elif split[3] == 'group':
+        event_type = EventType.GROUP_STAGE
     else:
         bot.send_message(chat_id=message.chat.id, text=strings.WRONG_MESSAGE_FORMAT_ERROR)
         return
@@ -138,7 +142,7 @@ def set_result_for_event(message):
 
     event_type = existing_event.event_type
     match event_type:
-        case EventType.SIMPLE:
+        case EventType.GROUP_STAGE | EventType.PLAY_OFF_FIRST_MATCH:
             team_1_has_gone_through = None
         case EventType.PLAY_OFF_SINGLE_MATCH:
             if team_1_scores > team_2_scores:
@@ -419,8 +423,12 @@ def send_message_with_results_for_last_18_hours(message):
                 continue
             guessed_event = calculate_if_user_guessed_result(event_result=event_result, bet=bet)
             if guessed_event is not None:
-                scores_earned_total_by_user += convert_guessed_event_to_scores(guessed_event=guessed_event)
-            if event.event_type != EventType.SIMPLE:
+                base_scores = convert_guessed_event_to_scores(guessed_event=guessed_event)
+                scores_earned_total_by_user += joker_utils.calculate_scores_with_joker(
+                    base_scores=base_scores,
+                    is_joker=bet.is_joker,
+                )
+            if event.decides_who_goes_through():
                 # Также можно получить +1 очко за проход одной из команд.Независимо от первой ставки.
                 if is_guessed_who_has_gone_through(result=event_result, bet=bet):
                     scores_earned_total_by_user += 1
@@ -441,6 +449,207 @@ def get_detailed_analytics(message):
     bot.send_message(chat_id=message.chat.id, text=leaderboard_text)
     bot.send_message(chat_id=message.chat.id, text=detailed_statistic_text)
     bot.send_message(chat_id=message.chat.id, text=matches_statistic)
+
+
+def get_user_bets_with_events(user_id: int) -> list[tuple[Bet, Event]]:
+    result = []
+    for bet in database.get_all_user_bets(user_id=user_id):
+        event = database.get_event_by_uuid(uuid=bet.event_uuid)
+        if event is None:
+            continue
+        result.append((bet, event))
+    result.sort(key=lambda x: x[1].time, reverse=False)
+    return result
+
+
+def get_awaiting_bets_with_index(user_id: int) -> list[tuple[int, Bet, Event]]:
+    bets_with_events = get_user_bets_with_events(user_id=user_id)
+    bets_awaiting = list(filter(lambda x: x[1].result is None, bets_with_events))
+    result = []
+    index = 1
+    for bet, event in bets_awaiting:
+        result.append((index, bet, event))
+        index += 1
+    return result
+
+
+def get_joker_status_for_user(user_id: int) -> joker_utils.JokerStatus:
+    return joker_utils.calculate_joker_status(
+        bets_with_events=get_user_bets_with_events(user_id=user_id),
+        events=database.get_all_events(),
+        now_utc=datetime_utils.get_utc_time(),
+    )
+
+
+def create_joker_offer_markup(user_id: int, event: Event) -> InlineKeyboardMarkup | None:
+    bet = database.find_bet(user_id=user_id, event_uuid=event.uuid)
+    if bet is None:
+        return None
+    bets_with_events = get_user_bets_with_events(user_id=user_id)
+    all_events = database.get_all_events()
+    if not joker_utils.can_assign_joker_to_bet(
+            bet=bet,
+            event=event,
+            bets_with_events=bets_with_events,
+            events=all_events,
+            now_utc=datetime_utils.get_utc_time(),
+    ):
+        return None
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton(
+            text='Поставить джокер',
+            callback_data=callback_data_utils.create_set_joker_callback_data(event_uuid=event.uuid),
+        )
+    )
+    return markup
+
+
+def send_joker_status_message(chat_id: int, user_id: int, event: Event | None = None):
+    status = get_joker_status_for_user(user_id=user_id)
+    text = joker_utils.get_joker_status_text(status)
+    markup = None
+    if event is not None:
+        markup = create_joker_offer_markup(user_id=user_id, event=event)
+        if markup is not None:
+            text += '\n\nМожно усилить этот прогноз джокером.'
+    bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
+
+
+def send_public_joker_set_message(user: User, event: Event):
+    bot.send_message(
+        chat_id=get_target_chat_id(),
+        text=f'{user.full_name} поставил джокер на матч {event.team_1} – {event.team_2}.'
+    )
+
+
+def send_public_joker_removed_message(user: User, event: Event):
+    bot.send_message(
+        chat_id=get_target_chat_id(),
+        text=f'{user.full_name} снял джокер с матча {event.team_1} – {event.team_2}.'
+    )
+
+
+def get_user_mention(user_model: UserModel) -> str:
+    if user_model.username:
+        return f'@{user_model.username}'
+    return user_model.first_name
+
+
+def send_set_joker_selection_message(chat_id: int, user_id: int):
+    awaiting_bets = get_awaiting_bets_with_index(user_id=user_id)
+    bets_with_events = get_user_bets_with_events(user_id=user_id)
+    all_events = database.get_all_events()
+    available_bets = []
+    for index, bet, event in awaiting_bets:
+        if joker_utils.can_assign_joker_to_bet(
+                bet=bet,
+                event=event,
+                bets_with_events=bets_with_events,
+                events=all_events,
+                now_utc=datetime_utils.get_utc_time(),
+        ):
+            available_bets.append((index, event))
+
+    if len(available_bets) == 0:
+        bot.send_message(chat_id=chat_id, text='Подходящих ставок для джокера не найдено.')
+        return
+
+    buttons_list = []
+    for index, event in available_bets:
+        button = InlineKeyboardButton(
+            str(index),
+            callback_data=callback_data_utils.create_set_specific_joker_callback_data(event_uuid=event.uuid)
+        )
+        buttons_list.append(button)
+    markup = InlineKeyboardMarkup()
+    markup.row(*buttons_list)
+    bot.send_message(chat_id=chat_id, text='Выбери номер ставки для джокера', reply_markup=markup)
+
+
+def send_remove_joker_selection_message(chat_id: int, user_id: int):
+    awaiting_bets = get_awaiting_bets_with_index(user_id=user_id)
+    removable_bets = []
+    for index, bet, event in awaiting_bets:
+        if joker_utils.can_remove_joker_from_bet(bet=bet, event=event, now_utc=datetime_utils.get_utc_time()):
+            removable_bets.append((index, event))
+
+    if len(removable_bets) == 0:
+        bot.send_message(chat_id=chat_id, text='Ставок с джокером для снятия не найдено.')
+        return
+
+    buttons_list = []
+    for index, event in removable_bets:
+        button = InlineKeyboardButton(
+            str(index),
+            callback_data=callback_data_utils.create_remove_specific_joker_callback_data(event_uuid=event.uuid)
+        )
+        buttons_list.append(button)
+    markup = InlineKeyboardMarkup()
+    markup.row(*buttons_list)
+    bot.send_message(chat_id=chat_id, text='Выбери номер ставки, с которой нужно снять джокер', reply_markup=markup)
+
+
+def set_joker_for_event(user: User, chat_id: int, message_id: int, event_uuid: str) -> bool:
+    event = database.get_event_by_uuid(uuid=event_uuid)
+    if event is None:
+        bot.send_message(chat_id=chat_id, text=strings.EVENT_NOT_FOUND_ERROR)
+        return False
+    with joker_write_lock:
+        bet = database.find_bet(user_id=user.id, event_uuid=event.uuid)
+        if bet is None:
+            bot.send_message(chat_id=chat_id, text='Ставка на этот матч не обнаружена.')
+            return False
+        if not joker_utils.can_assign_joker_to_bet(
+                bet=bet,
+                event=event,
+                bets_with_events=get_user_bets_with_events(user_id=user.id),
+                events=database.get_all_events(),
+                now_utc=datetime_utils.get_utc_time(),
+        ):
+            bot.send_message(chat_id=chat_id, text='На этот матч сейчас нельзя поставить джокер.')
+            return False
+        bet.is_joker = True
+        database.update_bet(user_id=user.id, bet=bet)
+
+    send_public_joker_set_message(user=user, event=event)
+    try:
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=f'Джокер поставлен: {event.team_1} – {event.team_2}.'
+        )
+    except Exception as e:
+        logging.exception(e)
+    return True
+
+
+def remove_joker_from_event(user: User, chat_id: int, message_id: int, event_uuid: str) -> bool:
+    event = database.get_event_by_uuid(uuid=event_uuid)
+    if event is None:
+        bot.send_message(chat_id=chat_id, text=strings.EVENT_NOT_FOUND_ERROR)
+        return False
+    with joker_write_lock:
+        bet = database.find_bet(user_id=user.id, event_uuid=event.uuid)
+        if bet is None:
+            bot.send_message(chat_id=chat_id, text='Ставка на этот матч не обнаружена.')
+            return False
+        if not joker_utils.can_remove_joker_from_bet(bet=bet, event=event, now_utc=datetime_utils.get_utc_time()):
+            bot.send_message(chat_id=chat_id, text='С этого матча сейчас нельзя снять джокер.')
+            return False
+        bet.is_joker = False
+        database.update_bet(user_id=user.id, bet=bet)
+
+    send_public_joker_removed_message(user=user, event=event)
+    try:
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=f'Джокер снят: {event.team_1} – {event.team_2}.'
+        )
+    except Exception as e:
+        logging.exception(e)
+    return True
 
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -481,6 +690,40 @@ def callback_query(call):
                 event_uuid=event_uuid,
                 team_1_will_go_through=False
             )
+        elif callback_data_utils.is_set_joker_callback_data(call.data):
+            event_uuid = callback_data_utils.extract_uuid_from_set_joker_callback_data(call.data)
+            success = set_joker_for_event(
+                user=user,
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                event_uuid=event_uuid,
+            )
+            if success:
+                send_joker_status_message(chat_id=chat_id, user_id=user.id)
+        elif callback_data_utils.is_set_joker_button(call.data):
+            send_set_joker_selection_message(chat_id=chat_id, user_id=user.id)
+        elif callback_data_utils.is_remove_joker_button(call.data):
+            send_remove_joker_selection_message(chat_id=chat_id, user_id=user.id)
+        elif callback_data_utils.is_set_specific_joker_callback_data(call.data):
+            event_uuid = callback_data_utils.extract_uuid_from_set_specific_joker_callback_data(call.data)
+            success = set_joker_for_event(
+                user=user,
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                event_uuid=event_uuid,
+            )
+            if success:
+                send_my_bets_message(chat_id=chat_id, user_id=user.id)
+        elif callback_data_utils.is_remove_specific_joker_callback_data(call.data):
+            event_uuid = callback_data_utils.extract_uuid_from_remove_specific_joker_callback_data(call.data)
+            success = remove_joker_from_event(
+                user=user,
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                event_uuid=event_uuid,
+            )
+            if success:
+                send_my_bets_message(chat_id=chat_id, user_id=user.id)
         elif callback_data_utils.is_show_my_already_played_bets(call.data):
             all_bets = database.get_all_user_bets(user_id=user.id)
             bets_with_events = []
@@ -511,6 +754,8 @@ def callback_query(call):
                         text += f', проход {event.team_1}'
                     else:
                         text += f', проход {event.team_2}'
+                if bet.is_joker:
+                    text += ', джокер'
                 text += ')'
                 text += '\n\n'
             telegram_utils.safe_send_message(bot=bot, chat_id=call.message.chat.id, text=text.strip())
@@ -562,6 +807,8 @@ def callback_query(call):
                 return
 
             database.delete_bet(user_id=user.id, event_uuid=existing_event.uuid)
+            if existing_bet.is_joker:
+                send_public_joker_removed_message(user=user, event=existing_event)
             text = f'Ставка отменена: {existing_event.team_1} – {existing_event.team_2}.'
             bot.send_message(chat_id=chat_id, text=text)
             send_my_bets_message(chat_id=chat_id, user_id=user.id)
@@ -637,19 +884,21 @@ def get_text_messages(message):
         team_2_scores = int(split_result[1])
 
         match event.event_type:
-            case EventType.SIMPLE:
+            case EventType.GROUP_STAGE | EventType.PLAY_OFF_FIRST_MATCH:
                 bet = Bet(
                     user_id=user.id,
                     event_uuid=event.uuid,
                     team_1_scores=team_1_scores,
                     team_2_scores=team_2_scores,
                     team_1_will_go_through=None,
-                    created_at=datetime.now(timezone.utc)
+                    created_at=datetime.now(timezone.utc),
+                    is_joker=False,
                 )
                 database.add_bet(user_id=user.id, bet=bet)
                 database.clear_current_event_for_user(user_id=user.id)
                 bot.send_message(chat_id=message.chat.id,
                                  text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
+                send_joker_status_message(chat_id=message.chat.id, user_id=user.id, event=event)
                 send_coming_events(user_id=user.id, chat_id=message.chat.id, send_error_if_all_bets_already_make=False)
             case EventType.PLAY_OFF_SINGLE_MATCH:
                 if team_1_scores > team_2_scores:
@@ -665,7 +914,8 @@ def get_text_messages(message):
                     team_1_scores=team_1_scores,
                     team_2_scores=team_2_scores,
                     team_1_will_go_through=team_1_will_go_through,
-                    created_at=datetime.now(timezone.utc)
+                    created_at=datetime.now(timezone.utc),
+                    is_joker=False,
                 )
                 database.add_bet(user_id=user.id, bet=bet)
                 database.clear_current_event_for_user(user_id=user.id)
@@ -685,9 +935,11 @@ def get_text_messages(message):
                              f'Кто пройдёт дальше?',
                         reply_markup=markup
                     )
+                    send_joker_status_message(chat_id=message.chat.id, user_id=user.id, event=event)
                 else:
                     bot.send_message(chat_id=message.chat.id,
                                      text=f'Принято: {event.team_1} – {event.team_2} {bet.team_1_scores}:{bet.team_2_scores}')
+                    send_joker_status_message(chat_id=message.chat.id, user_id=user.id, event=event)
                     send_coming_events(user_id=user.id, chat_id=message.chat.id,
                                        send_error_if_all_bets_already_make=False)
 
@@ -698,7 +950,8 @@ def get_text_messages(message):
                     team_1_scores=team_1_scores,
                     team_2_scores=team_2_scores,
                     team_1_will_go_through=None,
-                    created_at=datetime.now(timezone.utc)
+                    created_at=datetime.now(timezone.utc),
+                    is_joker=False,
                 )
                 database.add_bet(user_id=user.id, bet=bet)
                 database.clear_current_event_for_user(user_id=user.id)
@@ -717,6 +970,7 @@ def get_text_messages(message):
                          f'Кто пройдёт дальше?',
                     reply_markup=markup
                 )
+                send_joker_status_message(chat_id=message.chat.id, user_id=user.id, event=event)
 
         msg_for_everybody = f'{user.full_name} сделал прогноз на матч {event.team_1} – {event.team_2}'
         bot.send_message(chat_id=get_target_chat_id(), text=msg_for_everybody)
@@ -761,11 +1015,12 @@ def send_coming_events(user_id: int, chat_id: int, send_error_if_all_bets_alread
             continue
         coming_events.append(event)
 
+    status_text = joker_utils.get_joker_status_text(get_joker_status_for_user(user_id=user_id))
     if len(coming_events) == 0:
-        bot.send_message(chat_id=chat_id, text="Матчей не обнаружено")
+        bot.send_message(chat_id=chat_id, text=f'{status_text}\n\nМатчей не обнаружено')
         return
 
-    text = ''
+    text = f'{status_text}\n\nДжокер можно поставить после прогноза или через /my_bets.\n\n'
     index = 0
     max_events_in_message = 10
     events_available_for_bet_with_index = []
@@ -783,7 +1038,7 @@ def send_coming_events(user_id: int, chat_id: int, send_error_if_all_bets_alread
 
     if len(events_available_for_bet_with_index) == 0:
         if send_error_if_all_bets_already_make:
-            bot.send_message(chat_id=chat_id, text='На все предстоящие матчи прогноз уже сделан.')
+            bot.send_message(chat_id=chat_id, text=f'{status_text}\n\nНа все предстоящие матчи прогноз уже сделан.')
         return
 
     text += '\nВыбери матч для прогноза'
@@ -799,24 +1054,16 @@ def send_coming_events(user_id: int, chat_id: int, send_error_if_all_bets_alread
 
 
 def send_my_bets_message(chat_id: int, user_id: int):
-    all_bets = database.get_all_user_bets(user_id=user_id)
-    bets_with_events = []
-    for bet in all_bets:
-        event = database.get_event_by_uuid(uuid=bet.event_uuid)
-        if event is None:
-            continue
-        bets_with_events.append((bet, event))
-
+    bets_with_events = get_user_bets_with_events(user_id=user_id)
+    status_text = joker_utils.get_joker_status_text(get_joker_status_for_user(user_id=user_id))
     if len(bets_with_events) == 0:
-        msg = 'Пока ничего нет. Начни с команды /coming_events.'
-        bot.send_message(chat_id=chat_id, text=msg)
+        bot.send_message(chat_id=chat_id, text=f'{status_text}\n\nПока ничего нет. Начни с команды /coming_events.')
         return
-    bets_with_events.sort(key=lambda x: x[1].time, reverse=False)
 
     bets_played = list(filter(lambda x: x[1].result is not None, bets_with_events))
     bets_awaiting = list(filter(lambda x: x[1].result is None, bets_with_events))
 
-    text = ''
+    text = f'{status_text}\n\n'
     if len(bets_awaiting) > 0:
         index = 1
         for (bet, event) in bets_awaiting:
@@ -824,6 +1071,8 @@ def send_my_bets_message(chat_id: int, user_id: int):
             index += 1
             text += (f'{event.team_1} – {event.team_2} ({event.get_time_in_moscow_zone().strftime('%d %b')}): '
                      f'{bet.team_1_scores}:{bet.team_2_scores}')
+            if bet.is_joker:
+                text += ' (джокер)'
             need_to_show_who_will_go_through = (bet.team_1_will_go_through is not None and
                                                 (event.event_type == EventType.PLAY_OFF_SECOND_MATCH or
                                                  bet.is_bet_on_draw())
@@ -850,6 +1099,39 @@ def send_my_bets_message(chat_id: int, user_id: int):
         callback_data_delete_bet = callback_data_utils.create_delete_bet_button()
         delete_bet_button = InlineKeyboardButton(text='Отменить ставку', callback_data=callback_data_delete_bet)
         reply_markup.add(delete_bet_button)
+        awaiting_bets = get_awaiting_bets_with_index(user_id=user_id)
+        can_set_joker = False
+        can_remove_joker = False
+        all_events = database.get_all_events()
+        for _, bet, event in awaiting_bets:
+            if not can_set_joker and joker_utils.can_assign_joker_to_bet(
+                    bet=bet,
+                    event=event,
+                    bets_with_events=bets_with_events,
+                    events=all_events,
+                    now_utc=datetime_utils.get_utc_time(),
+            ):
+                can_set_joker = True
+            if not can_remove_joker and joker_utils.can_remove_joker_from_bet(
+                    bet=bet,
+                    event=event,
+                    now_utc=datetime_utils.get_utc_time(),
+            ):
+                can_remove_joker = True
+        if can_set_joker:
+            reply_markup.add(
+                InlineKeyboardButton(
+                    text='Поставить джокер',
+                    callback_data=callback_data_utils.create_set_joker_button()
+                )
+            )
+        if can_remove_joker:
+            reply_markup.add(
+                InlineKeyboardButton(
+                    text='Снять джокер',
+                    callback_data=callback_data_utils.create_remove_joker_button()
+                )
+            )
     bot.send_message(chat_id=chat_id, text=text.strip(), reply_markup=reply_markup)
 
 
@@ -872,7 +1154,11 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
         guessed_result = calculate_if_user_guessed_result(event_result=result, bet=bet)
         scores_earned = 0
         if guessed_result is not None:
-            scores_earned = convert_guessed_event_to_scores(guessed_result)
+            base_scores = convert_guessed_event_to_scores(guessed_result)
+            scores_earned = joker_utils.calculate_scores_with_joker(
+                base_scores=base_scores,
+                is_joker=bet.is_joker,
+            )
             match guessed_result:
                 case GuessedEvent.WINNER:
                     guessed_only_winner.append(user_model)
@@ -883,7 +1169,7 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
                 case GuessedEvent.EXACT_SCORE:
                     guessed_total_score.append(user_model)
 
-        if event.event_type != EventType.SIMPLE:
+        if event.decides_who_goes_through():
             # Также можно получить +1 очко за проход одной из команд. Независимо от первой ставки.
             if is_guessed_who_has_gone_through(result=result, bet=bet):
                 scores_earned += 1
@@ -1064,7 +1350,7 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
                 guessed_draw_count += 1
             case GuessedEvent.EXACT_SCORE:
                 guessed_total_score_count += 1
-        if event.event_type != EventType.SIMPLE and is_guessed_who_has_gone_through(result=result, bet=user_bet):
+        if event.decides_who_goes_through() and is_guessed_who_has_gone_through(result=result, bet=user_bet):
             guessed_who_has_gone_through_count += 1
         if is_one_goal_from_total_score_winner_consider(event_result=result, bet=user_bet):
             one_goal_from_total_score_count_with_winner_consider += 1
@@ -1112,7 +1398,12 @@ def get_maintainer_ids() -> list:
 def run_scheduler():
     schedule.every(10).minutes.do(do_every_ten_minutes)
     while True:
-        schedule.run_pending()
+        # Любое исключение из плановой задачи (например, отправка заблокировавшему бота пользователю)
+        # не должно убивать поток-планировщик и останавливать все остальные рассылки.
+        try:
+            schedule.run_pending()
+        except Exception as e:
+            logging.exception(e)
         time.sleep(1)
 
 
@@ -1121,6 +1412,9 @@ def do_every_ten_minutes():
     check_coming_soon_events()
     check_for_night_events()
     check_for_unfinished_events()
+    check_playoff_joker_reminders()
+    check_tournament_end_joker_reminders()
+    check_for_burned_jokers_after_playoff_start()
 
 
 scheduler_thread = threading.Thread(target=run_scheduler)
@@ -1237,6 +1531,135 @@ def send_event_will_start_soon_warning(event_uuid: str, header_text: str):
     bot.send_message(chat_id=get_target_chat_id(), text=text.strip())
 
 
+def get_all_users_with_joker_status() -> list[tuple[UserModel, joker_utils.JokerStatus]]:
+    all_events = database.get_all_events()
+    now_utc = datetime_utils.get_utc_time()
+    result = []
+    for user_model in database.get_all_users():
+        status = joker_utils.calculate_joker_status(
+            bets_with_events=get_user_bets_with_events(user_id=user_model.id),
+            events=all_events,
+            now_utc=now_utc,
+        )
+        result.append((user_model, status))
+    return result
+
+
+def send_joker_threshold_reminder_if_due(target_time, now_utc, key_prefix, send_reminder):
+    # Надёжно к дрейфу планировщика: напоминание срабатывает на ПЕРВОМ тике после того, как порог
+    # (за 48/24/6 ч до target_time) пройден, а не в узком 10-минутном окне, которое тик может проскочить.
+    # Разовость гарантирует database.claim_reminder (ключ привязан к target_time, поэтому при сдвиге
+    # расписания напоминание корректно переоценивается заново).
+    crossed_hours = [
+        hours_before for hours_before in joker_utils.REMINDER_HOURS
+        if now_utc >= target_time - timedelta(hours=hours_before)
+    ]
+    if len(crossed_hours) == 0:
+        return
+    most_urgent_hours = min(crossed_hours)
+    if database.claim_reminder(f'{key_prefix}:{most_urgent_hours}:{target_time.isoformat()}'):
+        send_reminder(hours_before=most_urgent_hours)
+    # Гасим менее срочные пройденные пороги (например, при старте бота уже после окна 48 ч),
+    # чтобы они не сработали отдельным запоздалым сообщением.
+    for hours_before in crossed_hours:
+        if hours_before != most_urgent_hours:
+            database.claim_reminder(f'{key_prefix}:{hours_before}:{target_time.isoformat()}')
+
+
+def check_playoff_joker_reminders():
+    all_events = database.get_all_events()
+    playoff_start = joker_utils.get_playoff_start(all_events)
+    now_utc = datetime_utils.get_utc_time()
+    if playoff_start is None or now_utc >= playoff_start:
+        return
+    send_joker_threshold_reminder_if_due(
+        target_time=playoff_start,
+        now_utc=now_utc,
+        key_prefix='playoff_joker',
+        send_reminder=send_playoff_joker_reminders,
+    )
+
+
+def send_joker_reminder_message(chat_id: int, text: str):
+    # Best-effort: пользователь мог заблокировать бота или ни разу не открыть приватный чат
+    # (bot.send_message бросит ApiTelegramException). Один такой получатель не должен прерывать
+    # рассылку остальным и публичное сообщение, тем более что маркер claim_reminder уже записан.
+    try:
+        bot.send_message(chat_id=chat_id, text=text)
+    except Exception as e:
+        logging.exception(e)
+
+
+def send_playoff_joker_reminders(hours_before: int):
+    affected_users = []
+    for user_model, status in get_all_users_with_joker_status():
+        if status.will_burn_at_playoff_start <= 0:
+            continue
+        affected_users.append(user_model)
+        text = (f'Напоминание о джокерах: до старта плей-офф меньше {hours_before} часов.\n\n'
+                f'{joker_utils.get_joker_status_text(status)}')
+        send_joker_reminder_message(chat_id=user_model.id, text=text)
+
+    if len(affected_users) == 0:
+        return
+
+    mentions = ' '.join(map(get_user_mention, affected_users))
+    text = (f'Напоминание о джокерах перед плей-офф:\n{mentions}\n'
+            f'Если не потратить джокеры на матчи группового этапа, часть сгорит к старту плей-офф.')
+    send_joker_reminder_message(chat_id=get_target_chat_id(), text=text)
+
+
+def check_tournament_end_joker_reminders():
+    all_events = database.get_all_events()
+    tournament_end = joker_utils.get_tournament_end(all_events)
+    now_utc = datetime_utils.get_utc_time()
+    if tournament_end is None or now_utc >= tournament_end:
+        return
+    send_joker_threshold_reminder_if_due(
+        target_time=tournament_end,
+        now_utc=now_utc,
+        key_prefix='tournament_end_joker',
+        send_reminder=send_tournament_end_joker_reminders,
+    )
+
+
+def send_tournament_end_joker_reminders(hours_before: int):
+    affected_users = []
+    for user_model, status in get_all_users_with_joker_status():
+        if status.remaining_usable_now <= 0:
+            continue
+        affected_users.append(user_model)
+        text = (f'Напоминание о джокерах: до конца турнира меньше {hours_before} часов.\n\n'
+                f'{joker_utils.get_joker_status_text(status)}')
+        send_joker_reminder_message(chat_id=user_model.id, text=text)
+
+    if len(affected_users) == 0:
+        return
+
+    mentions = ' '.join(map(get_user_mention, affected_users))
+    text = (f'Напоминание о джокерах перед концом турнира:\n{mentions}\n'
+            f'У вас остались неиспользованные джокеры.')
+    send_joker_reminder_message(chat_id=get_target_chat_id(), text=text)
+
+
+def check_for_burned_jokers_after_playoff_start():
+    all_events = database.get_all_events()
+    playoff_start = joker_utils.get_playoff_start(all_events)
+    now_utc = datetime_utils.get_utc_time()
+    if playoff_start is None or now_utc < playoff_start:
+        return
+    # Срабатывает на первом тике после старта плей-офф и ровно один раз (claim_reminder),
+    # без узкого окна, которое дрейф планировщика мог проскочить и потерять сообщение навсегда.
+    if not database.claim_reminder(f'burned_at_playoff_start:{playoff_start.isoformat()}'):
+        return
+    for user_model, status in get_all_users_with_joker_status():
+        if status.will_burn_at_playoff_start <= 0:
+            continue
+        text = (f'Стартовал плей-офф. Сгорело джокеров: {status.will_burn_at_playoff_start}.\n\n'
+                f'{joker_utils.get_joker_status_text(status)}')
+        send_joker_reminder_message(chat_id=user_model.id, text=text)
+
+
 def check_for_unfinished_events():
     utc_time = datetime_utils.get_utc_time()
     if utc_time.minute not in range(10, 20):
@@ -1256,7 +1679,8 @@ def check_for_unfinished_events():
 
 
 def is_event_requires_finish(unfinished_event: Event) -> bool:
-    if unfinished_event.event_type != EventType.SIMPLE:
+    # Дополнительное время/пенальти возможны только в матчах, где проход определяется самим матчем.
+    if unfinished_event.decides_who_goes_through():
         delta_hours = 3
     else:
         delta_hours = 2

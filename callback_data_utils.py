@@ -67,6 +67,65 @@ def extract_uuid_from_delete_specific_bet_callback_data(callback_data: str) -> s
     return callback_data.removeprefix('delete_specific_bet_')
 
 
+def create_set_joker_callback_data(event_uuid: str) -> str:
+    return f'set_joker_{event_uuid}'
+
+
+def is_set_joker_callback_data(callback_data: str) -> bool:
+    # 'set_joker_button' тоже начинается с 'set_joker_', но это кнопка-меню, а не set_joker_<uuid>.
+    return callback_data.startswith('set_joker_') and not is_set_joker_button(callback_data)
+
+
+def extract_uuid_from_set_joker_callback_data(callback_data: str) -> str:
+    if not is_set_joker_callback_data(callback_data):
+        raise ValueError('This is not set joker callback data')
+    return callback_data.removeprefix('set_joker_')
+
+
+def create_set_joker_button() -> str:
+    return 'set_joker_button'
+
+
+def is_set_joker_button(callback_data: str) -> bool:
+    return callback_data == 'set_joker_button'
+
+
+def create_remove_joker_button() -> str:
+    return 'remove_joker_button'
+
+
+def is_remove_joker_button(callback_data: str) -> bool:
+    return callback_data == 'remove_joker_button'
+
+
+def create_set_specific_joker_callback_data(event_uuid: str) -> str:
+    return f'set_specific_joker_{event_uuid}'
+
+
+def is_set_specific_joker_callback_data(callback_data: str) -> bool:
+    return callback_data.startswith('set_specific_joker_')
+
+
+def extract_uuid_from_set_specific_joker_callback_data(callback_data: str) -> str:
+    if not is_set_specific_joker_callback_data(callback_data):
+        raise ValueError('This is not set specific joker callback data')
+    return callback_data.removeprefix('set_specific_joker_')
+
+
+def create_remove_specific_joker_callback_data(event_uuid: str) -> str:
+    return f'remove_specific_joker_{event_uuid}'
+
+
+def is_remove_specific_joker_callback_data(callback_data: str) -> bool:
+    return callback_data.startswith('remove_specific_joker_')
+
+
+def extract_uuid_from_remove_specific_joker_callback_data(callback_data: str) -> str:
+    if not is_remove_specific_joker_callback_data(callback_data):
+        raise ValueError('This is not remove specific joker callback data')
+    return callback_data.removeprefix('remove_specific_joker_')
+
+
 def extract_uuid_from_team_2_will_go_through_callback_data(callback_data: str) -> str:
     if not is_team_2_will_go_through_callback_data(callback_data):
         raise ValueError('This is not team_2_will_go_through callback data')
