@@ -8,6 +8,8 @@ import mapper
 from models import Event, Bet, Tournament
 
 
+# Полностью дропнуть БД перед стартом нового турнира: mongosh --eval 'db.getSiblingDB("totalizator").dropDatabase()'
+
 class Database:
     def __init__(self):
         self.client = MongoClient('localhost', 27017)
