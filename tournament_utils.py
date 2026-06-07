@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Iterable
 
 from models import Event, Group
@@ -14,6 +14,15 @@ MIN_TEAMS_PER_GROUP = 2
 
 # Маркер первой строки /setup_tournament, разрешающий перезапись уже открытой структуры.
 FORCE_TOKEN = 'FORCE'
+
+# Пороги напоминаний о незаполненных спецставках (до старта первого матча): за сутки,
+# в день матча и «последний зов». Порядок важен только для читабельности — выбор самого
+# срочного делается по величине timedelta. См. select_due_threshold.
+SPECIAL_BET_REMINDER_THRESHOLDS = (
+    ('24h', timedelta(hours=24)),
+    ('soon', timedelta(hours=1, minutes=45)),
+    ('last_call', timedelta(minutes=10)),
+)
 
 
 def normalize_team_name(name: str | None) -> str:
@@ -39,6 +48,25 @@ def get_tournament_start(events: Iterable[Event]) -> datetime | None:
     if len(times) == 0:
         return None
     return min(times)
+
+
+def select_due_threshold(now_utc: datetime, start: datetime, thresholds) -> tuple[str | None, list[str]]:
+    # Какое напоминание пора слать на данном тике планировщика. Возвращает (самый срочный
+    # пройденный порог, все пройденные пороги). Самый срочный = с наименьшим offset (ближе к старту).
+    # Логика как у send_joker_threshold_reminder_if_due: при запуске после простоя, когда сразу
+    # пройдено несколько порогов, шлём только самый срочный, а остальные вызывающий гасит.
+    crossed = [(label, delta) for label, delta in thresholds if now_utc >= start - delta]
+    if len(crossed) == 0:
+        return None, []
+    due_label = min(crossed, key=lambda x: x[1])[0]
+    return due_label, [label for label, _ in crossed]
+
+
+def missing_group_ids(picks: dict, group_ids: Iterable) -> list:
+    # Группы турнира, на победителя которых участник ещё не поставил. Ориентируемся на
+    # АКТУАЛЬНЫЕ группы (group_ids), поэтому устаревшие ключи picks после пере-setup игнорируются,
+    # а тот, кто заполнил 11 из 12 групп, попадёт в список (вернётся непустым).
+    return [group_id for group_id in group_ids if group_id not in picks]
 
 
 # --- Парсинг bulk-команд мейнтейнера ------------------------------------------------

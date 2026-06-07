@@ -2005,6 +2005,7 @@ def do_every_ten_minutes():
     check_playoff_joker_reminders()
     check_tournament_end_joker_reminders()
     check_for_burned_jokers_after_playoff_start()
+    check_special_bets_reminders()
     check_special_bets_close()
 
 
@@ -2249,6 +2250,62 @@ def check_for_burned_jokers_after_playoff_start():
         text = (f'Стартовал плей-офф. Сгорело джокеров: {status.will_burn_at_playoff_start}.\n\n'
                 f'{joker_utils.get_joker_status_text(status)}')
         send_joker_reminder_message(chat_id=user_model.id, text=text)
+
+
+def send_special_bet_reminder(header: str, users_without_bet: list[UserModel]):
+    # Публичное напоминание в общий чат с упоминанием только тех, кто ещё не сделал ставку.
+    # Маркер claim_reminder ставится вызывающим ДО построения списка, поэтому при пустом списке
+    # просто ничего не шлём (но порог уже погашен) — как в check_special_bets_close.
+    if len(users_without_bet) == 0:
+        return
+    mentions = '\n'.join(map(get_user_mention, users_without_bet))
+    send_joker_reminder_message(chat_id=get_target_chat_id(), text=f'{header}\n{mentions}')
+
+
+def check_special_bets_reminders():
+    # Напоминания тем, кто не сделал открытую спецставку: за сутки до старта первого матча,
+    # в день матча и «последний зов» (пороги в tournament_utils.SPECIAL_BET_REMINDER_THRESHOLDS).
+    # Пороговый подход + claim_reminder (как send_joker_threshold_reminder_if_due) надёжен к дрейфу
+    # планировщика. Чемпион и группы независимы: свои ключи, свой гард открытия, своё гашение порогов.
+    events = database.get_all_events()
+    if len(events) == 0:
+        return
+    start = tournament_utils.get_tournament_start(events)
+    now_utc = datetime_utils.get_utc_time()
+    if start is None or now_utc >= start:
+        return  # после старта добивает check_special_bets_close (разовое «вы опоздали»)
+    tournament = database.get_tournament()
+    if tournament is None:
+        return
+    if not tournament.champion_bet_open and not tournament.group_bet_open:
+        return
+
+    due_label, crossed = tournament_utils.select_due_threshold(
+        now_utc, start, tournament_utils.SPECIAL_BET_REMINDER_THRESHOLDS
+    )
+    if due_label is None:
+        return
+
+    if tournament.champion_bet_open:
+        if database.claim_reminder(f'special_remind:champion:{due_label}:{start.isoformat()}'):
+            without_bet = [u for u in database.get_all_users() if not database.get_champion_bet(u.id)]
+            send_special_bet_reminder(strings.CHAMPION_REMINDER_HEADERS[due_label], without_bet)
+        # Гасим менее срочные пройденные пороги, чтобы они не выстрелили запоздалым сообщением.
+        for label in crossed:
+            if label != due_label:
+                database.claim_reminder(f'special_remind:champion:{label}:{start.isoformat()}')
+
+    if tournament.group_bet_open:
+        if database.claim_reminder(f'special_remind:group:{due_label}:{start.isoformat()}'):
+            group_ids = [group.id for group in tournament.groups]
+            without_bet = [
+                u for u in database.get_all_users()
+                if tournament_utils.missing_group_ids(database.get_group_champion_bets(u.id), group_ids)
+            ]
+            send_special_bet_reminder(strings.GROUP_REMINDER_HEADERS[due_label], without_bet)
+        for label in crossed:
+            if label != due_label:
+                database.claim_reminder(f'special_remind:group:{label}:{start.isoformat()}')
 
 
 def check_special_bets_close():

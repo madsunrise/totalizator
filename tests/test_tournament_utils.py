@@ -233,5 +233,77 @@ class SettlementIdempotencyTest(unittest.TestCase):
         self.assertEqual(totals, {1: 10, 2: 10, 3: 10})
 
 
+class SelectDueThresholdTest(unittest.TestCase):
+    THRESHOLDS = tournament_utils.SPECIAL_BET_REMINDER_THRESHOLDS
+
+    def setUp(self):
+        self.start = datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc)
+
+    def select(self, before_start: timedelta):
+        return tournament_utils.select_due_threshold(self.start - before_start, self.start, self.THRESHOLDS)
+
+    def test_none_before_any_threshold(self):
+        due, crossed = self.select(timedelta(days=3))
+        self.assertIsNone(due)
+        self.assertEqual(crossed, [])
+
+    def test_24h_window_only_24h_crossed(self):
+        # Чуть позже отметки за сутки, но раньше дневных порогов.
+        due, crossed = self.select(timedelta(hours=20))
+        self.assertEqual(due, '24h')
+        self.assertEqual(crossed, ['24h'])
+
+    def test_soon_window_due_is_soon(self):
+        # Пройдены 24h и soon, но не last_call -> самый срочный из них soon.
+        due, crossed = self.select(timedelta(hours=1))
+        self.assertEqual(due, 'soon')
+        self.assertCountEqual(crossed, ['24h', 'soon'])
+
+    def test_last_call_window_due_is_last_call_all_crossed(self):
+        # За 5 минут до старта пройдены все три порога -> шлём только last_call.
+        due, crossed = self.select(timedelta(minutes=5))
+        self.assertEqual(due, 'last_call')
+        self.assertCountEqual(crossed, ['24h', 'soon', 'last_call'])
+
+    def test_late_start_suppresses_stale_24h(self):
+        # Бот/приём поднялись за 30 минут до старта: сразу пройдены 24h и soon (но не last_call).
+        # Самый срочный — soon, поэтому запоздалое «за сутки» не уйдёт (вызывающий погасит метку 24h).
+        due, crossed = self.select(timedelta(minutes=30))
+        self.assertEqual(due, 'soon')
+        self.assertIn('24h', crossed)
+        self.assertCountEqual(crossed, ['24h', 'soon'])
+
+    def test_exactly_at_threshold_is_crossed(self):
+        # Граница включительна (now >= start - delta).
+        due, crossed = self.select(timedelta(hours=24))
+        self.assertEqual(due, '24h')
+        self.assertEqual(crossed, ['24h'])
+
+
+class MissingGroupIdsTest(unittest.TestCase):
+    def test_empty_picks_returns_all_groups(self):
+        group_ids = ['A', 'B', 'C']
+        self.assertEqual(tournament_utils.missing_group_ids({}, group_ids), ['A', 'B', 'C'])
+
+    def test_eleven_of_twelve_returns_the_missing_one(self):
+        group_ids = [f'g{i}' for i in range(12)]
+        picks = {f'g{i}': 'team' for i in range(12) if i != 7}
+        self.assertEqual(tournament_utils.missing_group_ids(picks, group_ids), ['g7'])
+
+    def test_all_picked_returns_empty(self):
+        group_ids = ['A', 'B']
+        picks = {'A': 'team1', 'B': 'team2'}
+        self.assertEqual(tournament_utils.missing_group_ids(picks, group_ids), [])
+
+    def test_stale_pick_key_is_ignored(self):
+        # После пере-setup у юзера остался ключ старой группы 'D' — он не закрывает текущие группы.
+        group_ids = ['A', 'B']
+        picks = {'A': 'team1', 'D': 'old'}
+        self.assertEqual(tournament_utils.missing_group_ids(picks, group_ids), ['B'])
+
+    def test_no_groups_returns_empty(self):
+        self.assertEqual(tournament_utils.missing_group_ids({}, []), [])
+
+
 if __name__ == '__main__':
     unittest.main()
