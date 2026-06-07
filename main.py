@@ -2244,12 +2244,16 @@ def check_for_burned_jokers_after_playoff_start():
     # без узкого окна, которое дрейф планировщика мог проскочить и потерять сообщение навсегда.
     if not database.claim_reminder(f'burned_at_playoff_start:{playoff_start.isoformat()}'):
         return
+    # Одно сообщение в общий чат с упоминанием всех, у кого сгорели джокеры, и числом сгоревших.
+    lines = []
     for user_model, status in get_all_users_with_joker_status():
         if status.will_burn_at_playoff_start <= 0:
             continue
-        text = (f'Стартовал плей-офф. Сгорело джокеров: {status.will_burn_at_playoff_start}.\n\n'
-                f'{joker_utils.get_joker_status_text(status)}')
-        send_joker_reminder_message(chat_id=user_model.id, text=text)
+        lines.append(f'{get_user_mention(user_model)} — {status.will_burn_at_playoff_start}')
+    if len(lines) == 0:
+        return
+    text = 'Стартовал плей-офф, сгорели неиспользованные джокеры:\n' + '\n'.join(lines)
+    send_joker_reminder_message(chat_id=get_target_chat_id(), text=text)
 
 
 def send_special_bet_reminder(header: str, users_without_bet: list[UserModel]):
