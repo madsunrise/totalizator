@@ -15,6 +15,7 @@ from telebot.types import User, InlineKeyboardMarkup, InlineKeyboardButton
 import callback_data_utils
 import constants
 import datetime_utils
+import event_utils
 import joker_utils
 import strings
 import telegram_utils
@@ -41,62 +42,55 @@ def start(message):
 
 
 # Service method
-# Формат сообщения для матча группового этапа: "Германия; Шотландия; 14.06.2024 22:00; group"
-# Формат сообщения для первого матча в плей-офф (двухматчевая пара): "Германия; Шотландия; 14.06.2024 22:00; playoff_first_match"
-# Формат сообщения для ответного (второго) матча в плей-офф: "Германия; Шотландия; 14.06.2024 22:00; playoff_second_match"
-# Формат сообщения для матча на вылет (например, финал): "Германия; Шотландия; 14.06.2024 22:00; playoff_single"
+# Один матч на строку: "Германия; Шотландия; 14.06.2024 22:00; group". Можно добавить
+# несколько матчей одним сообщением — по одному на строку (тело может идти и на первой строке
+# с командой, и со следующих строк). Типы: group | playoff_first_match | playoff_second_match | playoff_single.
+# Время — по Москве. При любой синтаксической ошибке НЕ добавляется ничего (все ошибки сразу);
+# уже существующие матчи пропускаются (повторная отправка списка безопасна).
 @bot.message_handler(commands=['add_event'])
 def add_event(message):
     user = message.from_user
     if not is_maintainer(user=user):
         return
     save_user_or_update_interaction(user=user)
-    split = list(map(lambda x: x.strip(), message.text.removeprefix('/add_event').strip().split(';')))
-
-    if len(split) != 4:
-        bot.send_message(chat_id=message.chat.id, text=strings.WRONG_MESSAGE_FORMAT_ERROR)
+    parsed_events, errors = event_utils.parse_events_block(message.text)
+    if errors:
+        telegram_utils.safe_send_message(
+            bot=bot, chat_id=message.chat.id, text='Ничего не добавлено. Ошибки:\n' + '\n'.join(errors))
         return
 
-    team_1 = split[0]
-    team_2 = split[1]
+    moscow_tz = pytz.timezone('Europe/Moscow')
+    now_utc = datetime_utils.get_utc_time()
+    added = []  # list[ParsedEvent]
+    skipped = []  # list[ParsedEvent] — уже есть в базе
+    in_past = 0  # сколько добавленных матчей уже в прошлом (подсказка про опечатку в дате)
+    for parsed in parsed_events:
+        existing = database.find_event(team_1=parsed.team_1, team_2=parsed.team_2, time=parsed.time_utc)
+        if existing is not None:
+            skipped.append(parsed)
+            continue
+        database.add_event(Event(
+            uuid=utils.generate_uuid(),
+            team_1=parsed.team_1,
+            team_2=parsed.team_2,
+            time=parsed.time_utc,
+            event_type=parsed.event_type,
+        ))
+        added.append(parsed)
+        if parsed.time_utc <= now_utc:
+            in_past += 1
 
-    date_format = '%d.%m.%Y %H:%M'
-    datetime_obj = datetime.strptime(split[2], date_format)
-
-    if split[3] == 'playoff_single':
-        event_type = EventType.PLAY_OFF_SINGLE_MATCH
-    elif split[3] == 'playoff_second_match':
-        event_type = EventType.PLAY_OFF_SECOND_MATCH
-    elif split[3] == 'playoff_first_match':
-        event_type = EventType.PLAY_OFF_FIRST_MATCH
-    elif split[3] == 'group':
-        event_type = EventType.GROUP_STAGE
-    else:
-        bot.send_message(chat_id=message.chat.id, text=strings.WRONG_MESSAGE_FORMAT_ERROR)
-        return
-
-    event_datetime_utc = datetime_utils.with_zone_same_instant(
-        datetime_obj=datetime_obj,
-        timezone_from=pytz.timezone('Europe/Moscow'),
-        timezone_to=pytz.utc
-    )
-
-    existing_event = database.find_event(team_1=team_1, team_2=team_2, time=event_datetime_utc)
-    if existing_event is not None:
-        bot.send_message(chat_id=message.chat.id, text=strings.EVENT_ALREADY_EXIST_ERROR)
-        return
-
-    event = Event(
-        uuid=utils.generate_uuid(),
-        team_1=team_1,
-        team_2=team_2,
-        time=event_datetime_utc,
-        event_type=event_type,
-    )
-    database.add_event(event)
-    msg = f"{strings.OK}: "
-    msg += f"{event.team_1} – {event.team_2}, {datetime_utils.to_display_string(datetime_obj)}"
-    bot.send_message(chat_id=message.chat.id, text=msg)
+    lines = [f'{strings.OK}. Добавлено матчей: {len(added)}.']
+    if skipped:
+        lines.append(f'Пропущено дубликатов: {len(skipped)}.')
+    if in_past:
+        # Самый ранний матч задаёт момент закрытия приёма спецставок: матч «в прошлом» закроет его сразу.
+        lines.append(f'⚠️ Матчей со временем в прошлом: {in_past}. Проверь дату — приём спецставок '
+                     f'закрывается по самому раннему матчу.')
+    for parsed in added:
+        moscow = parsed.time_utc.astimezone(moscow_tz)
+        lines.append(f'{parsed.team_1} – {parsed.team_2}, {datetime_utils.to_display_string(moscow)} МСК')
+    telegram_utils.safe_send_message(bot=bot, chat_id=message.chat.id, text='\n'.join(lines))
 
 
 # Service method
