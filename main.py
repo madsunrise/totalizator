@@ -2017,9 +2017,8 @@ def get_maintainer_ids() -> list:
 
 def run_scheduler():
     schedule.every(10).minutes.do(do_every_ten_minutes)
+    run_scheduled_task(check_api_results)
     while True:
-        # Любое исключение из плановой задачи (например, отправка заблокировавшему бота пользователю)
-        # не должно убивать поток-планировщик и останавливать все остальные рассылки.
         try:
             schedule.run_pending()
         except Exception as e:
@@ -2027,21 +2026,29 @@ def run_scheduler():
         time.sleep(1)
 
 
+def run_scheduled_task(task):
+    # Любое исключение из одной плановой задачи не должно срывать остальные проверки тика.
+    try:
+        task()
+    except Exception as e:
+        logging.exception(e)
+
+
 def do_every_ten_minutes():
-    send_morning_message_with_games_today()
-    check_coming_soon_events()
-    check_for_night_events()
-    check_api_results()  # сначала пробуем завершить матчи по API, чтобы не алертить зря
-    check_for_unfinished_events()
-    check_playoff_joker_reminders()
-    check_tournament_end_joker_reminders()
-    check_for_burned_jokers_after_playoff_start()
-    check_special_bets_reminders()
-    check_special_bets_close()
-
-
-scheduler_thread = threading.Thread(target=run_scheduler)
-scheduler_thread.start()
+    tasks = (
+        send_morning_message_with_games_today,
+        check_coming_soon_events,
+        check_for_night_events,
+        check_api_results,  # сначала пробуем завершить матчи по API, чтобы не алертить зря
+        check_for_unfinished_events,
+        check_playoff_joker_reminders,
+        check_tournament_end_joker_reminders,
+        check_for_burned_jokers_after_playoff_start,
+        check_special_bets_reminders,
+        check_special_bets_close,
+    )
+    for task in tasks:
+        run_scheduled_task(task)
 
 
 def send_morning_message_with_games_today():
@@ -2384,14 +2391,18 @@ def check_api_results():
             return
         events_in_progress = list(filter(lambda x: x.is_in_progress(), database.get_all_events()))
         if len(events_in_progress) == 0:
+            logging.info('football-data.org auto-finish skipped: no events in progress')
             return
         # Окно от даты самого раннего идущего матча до завтра: ночные матчи могут
         # начаться до полуночи UTC, а закончиться после.
         date_from = min(map(lambda x: x.get_time_in_utc(), events_in_progress)).date()
         date_to = (datetime_utils.get_utc_time() + timedelta(days=1)).date()
+        logging.info(f'Checking football-data.org for {len(events_in_progress)} event(s) in progress '
+                     f'from {date_from.isoformat()} to {date_to.isoformat()}')
         api_matches = football_api.fetch_matches(token=token, date_from=date_from, date_to=date_to)
         if api_matches is None:
             return  # причина уже в логе; сработает обычный алерт о незавершённых матчах
+        logging.info(f'football-data.org returned {len(api_matches)} parsed match(es)')
         for event in events_in_progress:
             try:
                 settle_event_from_api(event=event, api_matches=api_matches)
@@ -2417,6 +2428,8 @@ def settle_event_from_api(event: Event, api_matches: list):
             logging.info(f'No API match for event {event.uuid} ({event.team_1} – {event.team_2}): {reason}')
         return
     if api_match.status not in football_api.FINAL_STATUSES:
+        logging.info(f'API match for event {event.uuid} ({event.team_1} – {event.team_2}) '
+                     f'is not final yet: status={api_match.status}')
         return  # матч ещё идёт — это норма
     result, reason = football_api.build_event_result(event=event, api_match=api_match)
     if result is None:
@@ -2456,6 +2469,10 @@ def is_event_requires_finish(unfinished_event: Event) -> bool:
     else:
         delta_hours = 2
     return unfinished_event.get_time_in_utc() + timedelta(hours=delta_hours) < datetime_utils.get_utc_time()
+
+
+scheduler_thread = threading.Thread(target=run_scheduler)
+scheduler_thread.start()
 
 
 if __name__ == '__main__':
