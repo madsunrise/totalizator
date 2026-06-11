@@ -29,6 +29,10 @@ locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
 bot = telebot.TeleBot(os.environ[constants.ENV_BOT_TOKEN])
 database = Database()
 joker_write_lock = threading.Lock()
+# Завершение матча может прийти из двух потоков: ручной /result (поток telebot)
+# и авто-завершение по API (поток планировщика). Лок делает проверку
+# «результат ещё не записан» + запись + начисление очков атомарными.
+finish_event_lock = threading.Lock()
 logging.basicConfig(filename='totalizator.log', encoding='utf-8', level=logging.INFO)
 
 
@@ -179,12 +183,13 @@ def set_result_for_event(message):
 # записывает результат, начисляет очки и публикует итоги в группу.
 # Возвращает False, если матч уже завершён (защита от гонки /result vs авто-тик).
 def finish_event_and_announce(event: Event, result: EventResult, confirmation_chat_id: int | None = None) -> bool:
-    existing_event = database.get_event_by_uuid(uuid=event.uuid)
-    if existing_event is None or existing_event.result is not None:
-        return False
-    existing_event.result = result
-    database.update_event(event=existing_event)
-    guessers = calculate_scores_after_finished_event(event=existing_event)
+    with finish_event_lock:
+        existing_event = database.get_event_by_uuid(uuid=event.uuid)
+        if existing_event is None or existing_event.result is not None:
+            return False
+        existing_event.result = result
+        database.update_event(event=existing_event)
+        guessers = calculate_scores_after_finished_event(event=existing_event)
     event_type = existing_event.event_type
     msg_text = (f'Матч {existing_event.team_1} – {existing_event.team_2} завершился ' +
                 f'({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores}).')
@@ -262,7 +267,17 @@ def finish_event_and_announce(event: Event, result: EventResult, confirmation_ch
 
     msg_text += '-----\n'
     msg_text += get_leaderboard_text()
-    bot.send_message(chat_id=get_target_chat_id(), text=msg_text)
+    try:
+        bot.send_message(chat_id=get_target_chat_id(), text=msg_text)
+    except Exception as e:
+        # Очки уже начислены — повторно завершать матч нельзя, но итоги в группу не ушли.
+        # Маякнём мейнтейнерам, чтобы запостили вручную.
+        logging.exception(e)
+        for user_id in get_maintainer_ids():
+            send_joker_reminder_message(
+                chat_id=user_id,
+                text=f'Матч {existing_event.team_1} – {existing_event.team_2} завершён, '
+                     f'но итоги не отправились в группу. Запости их вручную.')
     return True
 
 
@@ -2391,11 +2406,12 @@ def settle_event_from_api(event: Event, api_matches: list):
     if api_match is None:
         if reason.startswith('unmapped_team') and database.claim_reminder(f'api_unmapped:{event.uuid}'):
             # Незамапленная команда — постоянная проблема, маякнём мейнтейнеру один раз.
+            # Best-effort отправка: один заблокировавший бота получатель не должен лишить алерта остальных.
             msg = strings.API_UNMAPPED_EVENT % (event.team_1, event.team_2)
             msg += '\n'
             msg += event.uuid
             for user_id in get_maintainer_ids():
-                bot.send_message(user_id, text=msg)
+                send_joker_reminder_message(chat_id=user_id, text=msg)
         else:
             # not_found/ambiguous — возможно транзиентно; часовой алерт прикроет.
             logging.info(f'No API match for event {event.uuid} ({event.team_1} – {event.team_2}): {reason}')

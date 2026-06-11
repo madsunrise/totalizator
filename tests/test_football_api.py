@@ -85,13 +85,26 @@ class ParseMatchesResponseTest(unittest.TestCase):
         payload = {'matches': [
             {'utcDate': 'not-a-date', 'status': 'FINISHED', 'homeTeam': {'name': 'A'}, 'awayTeam': {'name': 'B'}},
             {'status': 'FINISHED'},
+            'garbage',
+            None,
+            42,
+            make_match_dict('Spain', 'Germany', score={'homeTeam': 'Spain'}),
             make_match_dict('Spain', 'Germany', score=regular_score(1, 0)),
         ]}
         matches = football_api.parse_matches_response(payload)
-        self.assertEqual(len(matches), 1)
+        self.assertEqual(len(matches), 2)
+
+    def test_non_dict_team_entries_skipped(self):
+        match_dict = make_match_dict('Spain', 'Germany', score=regular_score(1, 0))
+        match_dict['homeTeam'] = 'Spain'
+        self.assertEqual(football_api.parse_matches_response({'matches': [match_dict]}), [])
 
     def test_empty_payload(self):
         self.assertEqual(football_api.parse_matches_response({}), [])
+
+    def test_non_dict_payload(self):
+        self.assertEqual(football_api.parse_matches_response('not json object'), [])
+        self.assertEqual(football_api.parse_matches_response({'matches': 'abc'}), [])
 
 
 class FetchMatchesTest(unittest.TestCase):
@@ -106,10 +119,27 @@ class FetchMatchesTest(unittest.TestCase):
     def test_success(self):
         payload = {'matches': [make_match_dict('Spain', 'Germany', score=regular_score(2, 0))]}
         with mock.patch.object(football_api.requests, 'get',
-                               return_value=self.make_response(payload=payload)):
+                               return_value=self.make_response(payload=payload)) as mock_get:
             matches = football_api.fetch_matches('token', datetime(2026, 6, 15).date(),
                                                  datetime(2026, 6, 16).date())
         self.assertEqual(len(matches), 1)
+        # Контракт запроса: правильный URL, токен в заголовке, окно дат, таймаут.
+        mock_get.assert_called_once()
+        args, kwargs = mock_get.call_args
+        self.assertEqual(args[0], football_api.MATCHES_URL)
+        self.assertEqual(kwargs['headers'], {'X-Auth-Token': 'token'})
+        self.assertEqual(kwargs['params'], {'dateFrom': '2026-06-15', 'dateTo': '2026-06-16'})
+        self.assertIn('timeout', kwargs)
+
+    def test_non_json_response_returns_none(self):
+        response = self.make_response()
+        response.json.side_effect = ValueError('Expecting value')
+        with mock.patch.object(football_api.requests, 'get', return_value=response):
+            with self.assertLogs(level='WARNING') as logs:
+                result = football_api.fetch_matches('token', datetime(2026, 6, 15).date(),
+                                                    datetime(2026, 6, 16).date())
+        self.assertIsNone(result)
+        self.assertTrue(any('non-JSON' in line for line in logs.output))
 
     def test_rate_limited_returns_none(self):
         response = self.make_response(status_code=429, headers={'X-RequestCounter-Reset': '42'})
@@ -121,12 +151,16 @@ class FetchMatchesTest(unittest.TestCase):
         self.assertTrue(any('rate limit' in line for line in logs.output))
 
     def test_low_requests_available_logs_warning(self):
-        response = self.make_response(headers={'X-RequestsAvailable': '2'})
-        with mock.patch.object(football_api.requests, 'get', return_value=response):
-            with self.assertLogs(level='WARNING') as logs:
-                football_api.fetch_matches('token', datetime(2026, 6, 15).date(),
-                                           datetime(2026, 6, 16).date())
-        self.assertTrue(any('2 requests available' in line for line in logs.output))
+        # Название заголовка различается в документации и реальных ответах — поддерживаем все варианты.
+        for header_name in ('X-Requests-Available-Minute', 'X-Requests-Available', 'X-RequestsAvailable'):
+            response = self.make_response(headers={header_name: '2'})
+            with mock.patch.object(football_api.requests, 'get', return_value=response):
+                with self.assertLogs(level='WARNING') as logs:
+                    result = football_api.fetch_matches('token', datetime(2026, 6, 15).date(),
+                                                        datetime(2026, 6, 16).date())
+            self.assertTrue(any('2 requests available' in line for line in logs.output), header_name)
+            # Предупреждение — не отказ: запрос всё равно обработан.
+            self.assertEqual(result, [], header_name)
 
     def test_http_error_returns_none(self):
         with mock.patch.object(football_api.requests, 'get',
@@ -186,6 +220,22 @@ class FindApiMatchForEventTest(unittest.TestCase):
                                                    utc_date='2026-06-15T16:00:00Z',
                                                    score=regular_score(2, 1)))
         found, reason = football_api.find_api_match_for_event(event, [api_match])
+        self.assertIsNone(found)
+        self.assertEqual(reason, 'not_found')
+
+    def test_kickoff_tolerance_boundary(self):
+        # Ровно 15 минут — ещё совпадение, 16 — уже нет.
+        event = make_event('Испания', 'Германия')
+        at_boundary = self.parse_one(make_match_dict('Spain', 'Germany',
+                                                     utc_date='2026-06-15T19:15:00Z',
+                                                     score=regular_score(2, 1)))
+        found, _ = football_api.find_api_match_for_event(event, [at_boundary])
+        self.assertIsNotNone(found)
+
+        past_boundary = self.parse_one(make_match_dict('Spain', 'Germany',
+                                                       utc_date='2026-06-15T19:16:00Z',
+                                                       score=regular_score(2, 1)))
+        found, reason = football_api.find_api_match_for_event(event, [past_boundary])
         self.assertIsNone(found)
         self.assertEqual(reason, 'not_found')
 
@@ -313,8 +363,25 @@ class BuildEventResultTest(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(reason, 'no_winner')
 
+    def test_playoff_contradictory_winner_rejected(self):
+        # winner=DRAW при не-ничейном счёте — противоречивые данные, не угадываем.
+        event = make_event('Испания', 'Германия', EventType.PLAY_OFF_SINGLE_MATCH)
+        score = {'winner': 'DRAW', 'duration': 'REGULAR', 'fullTime': {'home': 2, 'away': 1}}
+        api_match = self.parse_one(make_match_dict('Spain', 'Germany', score=score))
+        result, reason = football_api.build_event_result(event, api_match)
+        self.assertIsNone(result)
+        self.assertEqual(reason, 'inconsistent_winner')
+
     def test_wrong_teams_orientation_mismatch(self):
         event = make_event('Испания', 'Франция')
+        api_match = self.parse_one(make_match_dict('Spain', 'Germany', score=regular_score(2, 1)))
+        result, reason = football_api.build_event_result(event, api_match)
+        self.assertIsNone(result)
+        self.assertEqual(reason, 'orientation_mismatch')
+
+    def test_half_swapped_orientation_mismatch(self):
+        # team_1 совпадает с гостями API, но team_2 не совпадает с хозяевами — отклоняем.
+        event = make_event('Германия', 'Франция')
         api_match = self.parse_one(make_match_dict('Spain', 'Germany', score=regular_score(2, 1)))
         result, reason = football_api.build_event_result(event, api_match)
         self.assertIsNone(result)

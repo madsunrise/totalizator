@@ -2,10 +2,9 @@
 # Сетевая здесь только fetch_matches; парсинг, сопоставление с нашими Event
 # и построение EventResult — чистые функции, тестируемые без сети и БД.
 import logging
+import requests
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
-
-import requests
 
 import team_names
 from models import Event, EventResult, EventType
@@ -50,6 +49,8 @@ def _parse_score_pair(score_dict) -> tuple | None:
 
 
 def _parse_team_keys(team_dict) -> frozenset:
+    if not isinstance(team_dict, dict):
+        return frozenset()
     keys = set()
     for field in ('name', 'shortName', 'tla'):
         value = team_dict.get(field)
@@ -90,9 +91,13 @@ def _parse_match(match_dict: dict) -> ApiMatch | None:
     )
 
 
-def parse_matches_response(payload: dict) -> list:
+def parse_matches_response(payload) -> list:
+    if not isinstance(payload, dict):
+        return []
     matches = []
     for match_dict in payload.get('matches') or []:
+        if not isinstance(match_dict, dict):
+            continue
         parsed = _parse_match(match_dict)
         if parsed is not None:
             matches.append(parsed)
@@ -113,7 +118,10 @@ def fetch_matches(token: str, date_from: date, date_to: date) -> list | None:
         return None
     # API просит следить за этими заголовками. При нашем темпе (1 запрос в 10 минут
     # против лимита 10/мин) упереться в лимит нельзя, но мониторим как просят.
-    requests_available = response.headers.get('X-RequestsAvailable')
+    # Название заголовка в документации и в реальных ответах пишется по-разному — проверяем все варианты.
+    requests_available = (response.headers.get('X-Requests-Available-Minute')
+                          or response.headers.get('X-Requests-Available')
+                          or response.headers.get('X-RequestsAvailable'))
     if requests_available is not None and requests_available.isdigit() and int(requests_available) < 3:
         logging.warning(f'football-data.org: only {requests_available} requests available '
                         f'(кто-то ещё использует этот токен?)')
@@ -177,8 +185,11 @@ def build_event_result(event: Event, api_match: ApiMatch) -> tuple:
     team_2_is_away = bool(team_2_keys & api_match.away_team_keys)
     if team_1_is_home != team_2_is_away:
         return None, 'orientation_mismatch'
-    if not team_1_is_home and not (team_1_keys & api_match.away_team_keys):
-        return None, 'orientation_mismatch'
+    if not team_1_is_home:
+        # Перевёрнутая ориентация: обе команды должны сойтись на противоположных сторонах.
+        swapped = (team_1_keys & api_match.away_team_keys) and (team_2_keys & api_match.home_team_keys)
+        if not swapped:
+            return None, 'orientation_mismatch'
 
     if api_match.duration in EXTENDED_DURATIONS:
         score_pair = api_match.regular_time
@@ -205,12 +216,15 @@ def build_event_result(event: Event, api_match: ApiMatch) -> tuple:
             team_1_has_gone_through = team_1_is_home
         elif api_match.winner == 'AWAY_TEAM':
             team_1_has_gone_through = not team_1_is_home
-        elif team_1_scores != team_2_scores:
+        elif api_match.winner is None and team_1_scores != team_2_scores:
             # winner не пришёл, но счёт основного времени не ничейный — победитель очевиден.
             team_1_has_gone_through = team_1_scores > team_2_scores
-        else:
+        elif api_match.winner is None:
             # Плей-офф без победителя не завершаем.
             return None, 'no_winner'
+        else:
+            # winner противоречит типу матча (например, DRAW в плей-офф) — данные битые.
+            return None, 'inconsistent_winner'
 
     result = EventResult(
         team_1_scores=team_1_scores,
