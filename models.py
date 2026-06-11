@@ -121,12 +121,14 @@ class Guessers:
                  guessed_goal_difference: list,
                  guessed_draw: list,
                  guessed_only_winner: list,
-                 guessed_who_has_gone_through: list):
+                 guessed_who_has_gone_through: list,
+                 triggered_jokers: list | None = None):
         self.guessed_total_score = guessed_total_score
         self.guessed_goal_difference = guessed_goal_difference
         self.guessed_draw = guessed_draw
         self.guessed_only_winner = guessed_only_winner
         self.guessed_who_has_gone_through = guessed_who_has_gone_through
+        self.triggered_jokers = triggered_jokers or []
 
     def is_everything_empty(self) -> bool:
         return (len(self.guessed_total_score) == 0 and

@@ -265,6 +265,14 @@ def finish_event_and_announce(event: Event, result: EventResult, confirmation_ch
                 msg_text += '\n'
             msg_text += '\n'
 
+        if len(guessers.triggered_jokers) > 0:
+            msg_text += 'Сработали джокеры:'
+            msg_text += '\n'
+            for user_model in guessers.triggered_jokers:
+                msg_text += user_model.get_full_name()
+                msg_text += '\n'
+            msg_text += '\n'
+
     msg_text += '-----\n'
     msg_text += get_leaderboard_text()
     try:
@@ -1761,6 +1769,7 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
     guessed_draw = []
     guessed_only_winner = []
     guessed_who_has_gone_through = []
+    triggered_jokers = []
 
     result = event.result
     if result is None:
@@ -1779,6 +1788,8 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
                 base_scores=base_scores,
                 is_joker=bet.is_joker,
             )
+            if bet.is_joker:
+                triggered_jokers.append(user_model)
             match guessed_result:
                 case GuessedEvent.WINNER:
                     guessed_only_winner.append(user_model)
@@ -1804,6 +1815,7 @@ def calculate_scores_after_finished_event(event: Event) -> Guessers:
         guessed_goal_difference=guessed_goal_difference,
         guessed_only_winner=guessed_only_winner,
         guessed_who_has_gone_through=guessed_who_has_gone_through,
+        triggered_jokers=triggered_jokers,
     )
 
 

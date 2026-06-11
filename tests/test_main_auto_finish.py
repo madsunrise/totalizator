@@ -22,7 +22,7 @@ finally:
     threading.Thread.start = _original_thread_start
 
 import football_api
-from models import Event, EventResult, EventType
+from models import Bet, Event, EventResult, EventType, UserModel
 
 TARGET_CHAT_ID = -100500
 MAINTAINER_ID = 42
@@ -40,8 +40,9 @@ class FakeBot:
 
 
 class FakeDatabase:
-    def __init__(self, events=None):
+    def __init__(self, events=None, users=None):
         self.events = events or []
+        self.users = users or []
         self.claimed = set()
 
     def get_all_events(self):
@@ -58,7 +59,19 @@ class FakeDatabase:
         raise ValueError('Event does not exist')
 
     def get_all_users(self):
-        return []
+        return list(self.users)
+
+    def find_bet(self, user_id, event_uuid):
+        user = next((u for u in self.users if u.id == user_id), None)
+        if user is None:
+            return None
+        return next((b for b in user.bets if b.event_uuid == event_uuid), None)
+
+    def add_scores_to_user(self, user_id, amount):
+        user = next((u for u in self.users if u.id == user_id), None)
+        if user is None:
+            raise ValueError('User does not exist')
+        user.scores = max(user.scores + amount, 0)
 
     def claim_reminder(self, key):
         if key in self.claimed:
@@ -83,6 +96,32 @@ def make_event(event_type=EventType.GROUP_STAGE, started_hours_ago=2) -> Event:
         team_2='Германия',
         time=datetime.now(timezone.utc) - timedelta(hours=started_hours_ago),
         event_type=event_type,
+    )
+
+
+def make_user(user_id: int, first_name: str, bets=None, scores=0) -> UserModel:
+    return UserModel(
+        id=user_id,
+        username=first_name.lower(),
+        first_name=first_name,
+        last_name='',
+        last_interaction=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+        scores=scores,
+        bets=bets or [],
+    )
+
+
+def make_bet(user_id: int, event: Event, team_1_scores: int, team_2_scores: int,
+             is_joker: bool = False) -> Bet:
+    return Bet(
+        user_id=user_id,
+        event_uuid=event.uuid,
+        team_1_scores=team_1_scores,
+        team_2_scores=team_2_scores,
+        team_1_will_go_through=None,
+        created_at=datetime.now(timezone.utc),
+        is_joker=is_joker,
     )
 
 
@@ -185,6 +224,35 @@ class FinishEventAndAnnounceTest(unittest.TestCase):
         self.assertIsNotNone(main.database.get_event_by_uuid(self.event.uuid).result)
         maintainer_messages = main.bot.messages_to(MAINTAINER_ID)
         self.assertTrue(any('не отправились в группу' in text for text in maintainer_messages))
+
+    def test_announces_only_triggered_jokers(self):
+        active_joker = make_user(
+            user_id=101,
+            first_name='Анна',
+            bets=[make_bet(101, self.event, 2, 1, is_joker=True)],
+        )
+        burned_joker = make_user(
+            user_id=102,
+            first_name='Борис',
+            bets=[make_bet(102, self.event, 0, 0, is_joker=True)],
+        )
+        regular_guesser = make_user(
+            user_id=103,
+            first_name='Вера',
+            bets=[make_bet(103, self.event, 3, 2, is_joker=False)],
+        )
+        main.database = FakeDatabase(events=[self.event], users=[active_joker, burned_joker, regular_guesser])
+
+        finished = main.finish_event_and_announce(event=self.event, result=EventResult(2, 1, None))
+
+        self.assertTrue(finished)
+        self.assertEqual(active_joker.scores, 8)
+        self.assertEqual(burned_joker.scores, 0)
+        self.assertEqual(regular_guesser.scores, 3)
+        group_message = main.bot.messages_to(TARGET_CHAT_ID)[0]
+        self.assertIn('Сработали джокеры:\nАнна\n\n-----', group_message)
+        self.assertNotIn('Борис\n\n-----', group_message)
+        self.assertNotIn('Вера\n\n-----', group_message)
 
 
 class ManualResultCommandTest(unittest.TestCase):
