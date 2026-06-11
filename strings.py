@@ -44,3 +44,7 @@ GROUP_REMINDER_HEADERS = {
     'soon': '❗️Скоро стартует турнир, а прогноз на победителей групп доделали не все (/group_bets в личке с ботом):',
     'last_call': '‼️ LAST CALL ‼️ Успей выбрать победителей групп (/group_bets в личке с ботом):',
 }
+
+# --- Авто-завершение матчей по football-data.org ---
+API_UNMAPPED_EVENT = ('Не смог сопоставить матч %s – %s с данными football-data.org '
+                      '(команда не найдена в team_names.py). Заверши его вручную через /result:')

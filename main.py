@@ -16,6 +16,7 @@ import callback_data_utils
 import constants
 import datetime_utils
 import event_utils
+import football_api
 import joker_utils
 import strings
 import telegram_utils
@@ -166,13 +167,25 @@ def set_result_for_event(message):
         case _:
             raise ValueError(f'Unknown enum value: {event_type}')
 
-    existing_event.result = EventResult(
+    result = EventResult(
         team_1_scores=team_1_scores,
         team_2_scores=team_2_scores,
         team_1_has_gone_through=team_1_has_gone_through
     )
+    finish_event_and_announce(event=existing_event, result=result, confirmation_chat_id=message.chat.id)
+
+
+# Общий путь завершения матча для ручного /result и авто-завершения по API:
+# записывает результат, начисляет очки и публикует итоги в группу.
+# Возвращает False, если матч уже завершён (защита от гонки /result vs авто-тик).
+def finish_event_and_announce(event: Event, result: EventResult, confirmation_chat_id: int | None = None) -> bool:
+    existing_event = database.get_event_by_uuid(uuid=event.uuid)
+    if existing_event is None or existing_event.result is not None:
+        return False
+    existing_event.result = result
     database.update_event(event=existing_event)
     guessers = calculate_scores_after_finished_event(event=existing_event)
+    event_type = existing_event.event_type
     msg_text = (f'Матч {existing_event.team_1} – {existing_event.team_2} завершился ' +
                 f'({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores}).')
 
@@ -185,7 +198,8 @@ def set_result_for_event(message):
         else:
             msg_text += f'Проходит {existing_event.team_2}.'
 
-    bot.send_message(chat_id=message.chat.id, text=msg_text)
+    if confirmation_chat_id is not None:
+        bot.send_message(chat_id=confirmation_chat_id, text=msg_text)
 
     msg_text += '\n\n'
     if guessers.is_everything_empty():
@@ -249,6 +263,7 @@ def set_result_for_event(message):
     msg_text += '-----\n'
     msg_text += get_leaderboard_text()
     bot.send_message(chat_id=get_target_chat_id(), text=msg_text)
+    return True
 
 
 @bot.message_handler(commands=['events'])
@@ -2001,6 +2016,7 @@ def do_every_ten_minutes():
     send_morning_message_with_games_today()
     check_coming_soon_events()
     check_for_night_events()
+    check_api_results()  # сначала пробуем завершить матчи по API, чтобы не алертить зря
     check_for_unfinished_events()
     check_playoff_joker_reminders()
     check_tournament_end_joker_reminders()
@@ -2335,6 +2351,68 @@ def check_special_bets_close():
                 send_joker_reminder_message(chat_id=user_model.id, text=strings.GROUP_BET_MISSED)
 
 
+api_token_missing_logged = False  # чтобы предупредить об отсутствии токена один раз, а не каждые 10 минут
+
+
+# Авто-завершение матчей: пока идёт хотя бы один матч, раз в тик спрашиваем у football-data.org
+# завершённые матчи и закрываем наши события тем же путём, что и ручной /result.
+# Любая ошибка здесь не должна сорвать остальные проверки тика, поэтому всё в try/except.
+def check_api_results():
+    global api_token_missing_logged
+    try:
+        token = os.environ.get(constants.ENV_FOOTBALL_DATA_TOKEN, '').strip()
+        if not token:
+            if not api_token_missing_logged:
+                logging.warning(f'{constants.ENV_FOOTBALL_DATA_TOKEN} is not set, '
+                                'auto-finishing events by API is disabled')
+                api_token_missing_logged = True
+            return
+        events_in_progress = list(filter(lambda x: x.is_in_progress(), database.get_all_events()))
+        if len(events_in_progress) == 0:
+            return
+        # Окно от даты самого раннего идущего матча до завтра: ночные матчи могут
+        # начаться до полуночи UTC, а закончиться после.
+        date_from = min(map(lambda x: x.get_time_in_utc(), events_in_progress)).date()
+        date_to = (datetime_utils.get_utc_time() + timedelta(days=1)).date()
+        api_matches = football_api.fetch_matches(token=token, date_from=date_from, date_to=date_to)
+        if api_matches is None:
+            return  # причина уже в логе; сработает обычный алерт о незавершённых матчах
+        for event in events_in_progress:
+            try:
+                settle_event_from_api(event=event, api_matches=api_matches)
+            except Exception as e:
+                logging.exception(e)  # ошибка по одному матчу не должна помешать остальным
+    except Exception as e:
+        logging.exception(e)
+
+
+def settle_event_from_api(event: Event, api_matches: list):
+    api_match, reason = football_api.find_api_match_for_event(event=event, api_matches=api_matches)
+    if api_match is None:
+        if reason.startswith('unmapped_team') and database.claim_reminder(f'api_unmapped:{event.uuid}'):
+            # Незамапленная команда — постоянная проблема, маякнём мейнтейнеру один раз.
+            msg = strings.API_UNMAPPED_EVENT % (event.team_1, event.team_2)
+            msg += '\n'
+            msg += event.uuid
+            for user_id in get_maintainer_ids():
+                bot.send_message(user_id, text=msg)
+        else:
+            # not_found/ambiguous — возможно транзиентно; часовой алерт прикроет.
+            logging.info(f'No API match for event {event.uuid} ({event.team_1} – {event.team_2}): {reason}')
+        return
+    if api_match.status not in football_api.FINAL_STATUSES:
+        return  # матч ещё идёт — это норма
+    result, reason = football_api.build_event_result(event=event, api_match=api_match)
+    if result is None:
+        logging.warning(f'Cannot build result for event {event.uuid} '
+                        f'({event.team_1} – {event.team_2}) from API match '
+                        f'{api_match.home_team} – {api_match.away_team}: {reason}')
+        return
+    if finish_event_and_announce(event=event, result=result):
+        logging.info(f'Auto-finished event {event.uuid} ({event.team_1} – {event.team_2}) '
+                     f'with result {result.team_1_scores}:{result.team_2_scores}')
+
+
 def check_for_unfinished_events():
     utc_time = datetime_utils.get_utc_time()
     if utc_time.minute not in range(10, 20):
@@ -2345,6 +2423,8 @@ def check_for_unfinished_events():
     if len(result_events) == 1:
         event = result_events[0]
         msg = f'❗️Матч {event.team_1} – {event.team_2} требует завершения.'
+        msg += '\n'
+        msg += event.uuid
         for user_id in get_maintainer_ids():
             bot.send_message(user_id, text=msg)
     elif len(result_events) > 1:

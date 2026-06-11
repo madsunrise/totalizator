@@ -21,4 +21,5 @@ ENTRYPOINT python3 ./main.py
 # сборка: docker buildx build --platform linux/amd64 -t totalizator:v1 .
 # сохранение: docker save -o totalizator_v1.tar totalizator:v1
 # выгрузка: docker load -i totalizator_v1.tar
-# запуск docker run --name totalizator --network=host -d --restart unless-stopped -e TELEGRAM_TARGET_CHAT_ID=0 -e TELEGRAM_BOT_TOKEN=your_token -e TELEGRAM_MAINTAINER_ID=0 totalizator:v1
+# запуск docker run --name totalizator --network=host -d --restart unless-stopped -e TELEGRAM_TARGET_CHAT_ID=0 -e TELEGRAM_BOT_TOKEN=your_token -e TELEGRAM_MAINTAINER_IDS=0 -e DATABASE_NAME=totalizator -e FOOTBALL_DATA_API_TOKEN=your_api_token totalizator:v1
+# FOOTBALL_DATA_API_TOKEN — токен football-data.org (бесплатная регистрация) для авто-завершения матчей; без него бот работает как раньше (только ручной /result).
