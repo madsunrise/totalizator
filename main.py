@@ -190,6 +190,9 @@ def finish_event_and_announce(event: Event, result: EventResult, confirmation_ch
         existing_event.result = result
         database.update_event(event=existing_event)
         guessers = calculate_scores_after_finished_event(event=existing_event)
+    # Матч ушёл из in-progress — состояние опроса API больше не нужно. Чистим здесь,
+    # чтобы покрыть оба пути завершения: авто и ручной /result.
+    api_poll_logged_states.pop(event.uuid, None)
     event_type = existing_event.event_type
     msg_text = (f'Матч {existing_event.team_1} – {existing_event.team_2} завершился ' +
                 f'({existing_event.result.team_1_scores}:{existing_event.result.team_2_scores}).')
@@ -2029,6 +2032,11 @@ def get_maintainer_ids() -> list:
 
 def run_scheduler():
     schedule.every(10).minutes.do(do_every_ten_minutes)
+    # Результаты матчей опрашиваем чаще общего тика, чтобы не ждать расчёта до 10 минут
+    # после финального свистка. Худшая минута — 3 запроса (два опроса + вызов из
+    # 10-минутного тика), втрое ниже лимита football-data.org (10/мин);
+    # без идущих матчей check_api_results в сеть не ходит.
+    schedule.every(30).seconds.do(run_scheduled_task, check_api_results)
     run_scheduled_task(check_api_results)
     while True:
         try:
@@ -2051,7 +2059,8 @@ def do_every_ten_minutes():
         send_morning_message_with_games_today,
         check_coming_soon_events,
         check_for_night_events,
-        check_api_results,  # сначала пробуем завершить матчи по API, чтобы не алертить зря
+        check_api_results,  # основной опрос — раз в 30 секунд в run_scheduler; здесь — чтобы в рамках
+        # тика успеть завершить матч по API до check_for_unfinished_events и не алертить зря
         check_for_unfinished_events,
         check_playoff_joker_reminders,
         check_tournament_end_joker_reminders,
@@ -2385,10 +2394,21 @@ def check_special_bets_close():
                 send_joker_reminder_message(chat_id=user_model.id, text=strings.GROUP_BET_MISSED)
 
 
-api_token_missing_logged = False  # чтобы предупредить об отсутствии токена один раз, а не каждые 10 минут
+api_token_missing_logged = False  # чтобы предупредить об отсутствии токена один раз, а не на каждом опросе
+
+# При опросе раз в 30 секунд неизменное состояние матча засоряло бы лог сотнями повторов —
+# запоминаем последнюю залогированную строку по событию и пишем только переходы.
+api_poll_logged_states = {}
 
 
-# Авто-завершение матчей: пока идёт хотя бы один матч, раз в тик спрашиваем у football-data.org
+def log_api_poll_state_change(event: Event, message: str, level: int = logging.INFO):
+    if api_poll_logged_states.get(event.uuid) == message:
+        return
+    api_poll_logged_states[event.uuid] = message
+    logging.log(level, message)
+
+
+# Авто-завершение матчей: пока идёт хотя бы один матч, раз в 30 секунд спрашиваем у football-data.org
 # завершённые матчи и закрываем наши события тем же путём, что и ручной /result.
 # Любая ошибка здесь не должна сорвать остальные проверки тика, поэтому всё в try/except.
 def check_api_results():
@@ -2437,17 +2457,19 @@ def settle_event_from_api(event: Event, api_matches: list):
                 send_joker_reminder_message(chat_id=user_id, text=msg)
         else:
             # not_found/ambiguous — возможно транзиентно; часовой алерт прикроет.
-            logging.info(f'No API match for event {event.uuid} ({event.team_1} – {event.team_2}): {reason}')
+            log_api_poll_state_change(event, f'No API match for event {event.uuid} '
+                                             f'({event.team_1} – {event.team_2}): {reason}')
         return
     if api_match.status not in football_api.FINAL_STATUSES:
-        logging.info(f'API match for event {event.uuid} ({event.team_1} – {event.team_2}) '
-                     f'is not final yet: status={api_match.status}')
+        log_api_poll_state_change(event, f'API match for event {event.uuid} ({event.team_1} – {event.team_2}) '
+                                         f'is not final yet: status={api_match.status}')
         return  # матч ещё идёт — это норма
     result, reason = football_api.build_event_result(event=event, api_match=api_match)
     if result is None:
-        logging.warning(f'Cannot build result for event {event.uuid} '
-                        f'({event.team_1} – {event.team_2}) from API match '
-                        f'{api_match.home_team} – {api_match.away_team}: {reason}')
+        log_api_poll_state_change(event, f'Cannot build result for event {event.uuid} '
+                                         f'({event.team_1} – {event.team_2}) from API match '
+                                         f'{api_match.home_team} – {api_match.away_team}: {reason}',
+                                  level=logging.WARNING)
         return
     if finish_event_and_announce(event=event, result=result):
         logging.info(f'Auto-finished event {event.uuid} ({event.team_1} – {event.team_2}) '

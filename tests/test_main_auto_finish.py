@@ -125,6 +125,17 @@ def make_bet(user_id: int, event: Event, team_1_scores: int, team_2_scores: int,
     )
 
 
+def make_api_match_with_status(event: Event, status: str):
+    payload = {'matches': [{
+        'utcDate': event.get_time_in_utc().strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'status': status,
+        'homeTeam': {'name': 'Spain', 'shortName': 'Spain', 'tla': 'ESP'},
+        'awayTeam': {'name': 'Germany', 'shortName': 'Germany', 'tla': 'GER'},
+        'score': {},
+    }]}
+    return football_api.parse_matches_response(payload)
+
+
 def make_finished_api_match(event: Event, home_score=2, away_score=1):
     payload = {'matches': [{
         'utcDate': event.get_time_in_utc().strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -145,6 +156,7 @@ class CheckApiResultsTest(unittest.TestCase):
         self.event = make_event()
         main.bot = FakeBot()
         main.database = FakeDatabase(events=[self.event])
+        main.api_poll_logged_states.clear()  # события в тестах делят один uuid
 
     def test_exception_never_escapes(self):
         # Инвариант: сбой авто-завершения не должен срывать остальные проверки тика.
@@ -186,6 +198,38 @@ class CheckApiResultsTest(unittest.TestCase):
                 main.check_api_results()
                 main.check_api_results()
         self.assertEqual(len(main.bot.messages_to(TARGET_CHAT_ID)), 1)
+
+    def test_in_progress_status_logged_only_on_change(self):
+        # Опрос идёт раз в 30 секунд: неизменное состояние матча не должно плодить строки в логе,
+        # но смена статуса должна попадать в лог.
+        with mock.patch.dict(os.environ, {'FOOTBALL_DATA_API_TOKEN': 'token'}):
+            with mock.patch.object(main.football_api, 'fetch_matches',
+                                   return_value=make_api_match_with_status(self.event, 'IN_PLAY')):
+                with self.assertLogs(level='INFO') as logs:
+                    main.check_api_results()
+                    main.check_api_results()
+            self.assertEqual(len([line for line in logs.output if 'not final yet' in line]), 1)
+            with mock.patch.object(main.football_api, 'fetch_matches',
+                                   return_value=make_api_match_with_status(self.event, 'PAUSED')):
+                with self.assertLogs(level='INFO') as logs:
+                    main.check_api_results()
+            self.assertEqual(len([line for line in logs.output if 'status=PAUSED' in line]), 1)
+
+    def test_cannot_build_result_warns_once(self):
+        # Второй матч пары всегда закрывается вручную — завершённый в API матч будет
+        # давать second_leg_manual_only при каждом опросе, но WARNING должен быть один.
+        self.event = make_event(event_type=EventType.PLAY_OFF_SECOND_MATCH)
+        main.database = FakeDatabase(events=[self.event])
+        api_matches = make_finished_api_match(self.event)
+        with mock.patch.object(main.football_api, 'fetch_matches', return_value=api_matches):
+            with mock.patch.dict(os.environ, {'FOOTBALL_DATA_API_TOKEN': 'token'}):
+                with self.assertLogs(level='WARNING') as logs:
+                    main.check_api_results()
+                    main.check_api_results()
+        warning_lines = [line for line in logs.output if 'second_leg_manual_only' in line]
+        self.assertEqual(len(warning_lines), 1)
+        self.assertTrue(warning_lines[0].startswith('WARNING:'))
+        self.assertIsNone(self.event.result)
 
     def test_unmapped_team_alerts_maintainer_once(self):
         self.event.team_1 = 'Нарния'

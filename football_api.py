@@ -116,8 +116,8 @@ def fetch_matches(token: str, date_from: date, date_to: date) -> list | None:
     except requests.RequestException as e:
         logging.warning(f'football-data.org request failed: {e}')
         return None
-    # API просит следить за этими заголовками. При нашем темпе (1 запрос в 10 минут
-    # против лимита 10/мин) упереться в лимит нельзя, но мониторим как просят.
+    # API просит следить за этими заголовками. При нашем темпе (не больше 3 запросов
+    # в минуту против лимита 10/мин) упереться в лимит нельзя, но мониторим как просят.
     # Название заголовка в документации и в реальных ответах пишется по-разному — проверяем все варианты.
     requests_available = (response.headers.get('X-Requests-Available-Minute')
                           or response.headers.get('X-Requests-Available')
