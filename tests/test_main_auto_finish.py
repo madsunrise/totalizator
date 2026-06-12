@@ -294,9 +294,146 @@ class FinishEventAndAnnounceTest(unittest.TestCase):
         self.assertEqual(burned_joker.scores, 0)
         self.assertEqual(regular_guesser.scores, 3)
         group_message = main.bot.messages_to(TARGET_CHAT_ID)[0]
-        self.assertIn('Сработали джокеры:\nАнна\n\n-----', group_message)
-        self.assertNotIn('Борис\n\n-----', group_message)
-        self.assertNotIn('Вера\n\n-----', group_message)
+        self.assertIn('Сработали джокеры:\nАнна\n\n', group_message)
+        self.assertNotIn('Сработали джокеры:\nБорис', group_message)
+        self.assertNotIn('Сработали джокеры:\nВера', group_message)
+
+    def test_announces_leaderboard_movement_when_rank_changed(self):
+        leader = make_user(
+            user_id=101,
+            first_name='Анна',
+            scores=8,
+            bets=[make_bet(101, self.event, 0, 0)],
+        )
+        riser = make_user(
+            user_id=102,
+            first_name='Борис',
+            scores=6,
+            bets=[make_bet(102, self.event, 2, 1)],
+        )
+        third = make_user(
+            user_id=103,
+            first_name='Вера',
+            scores=5,
+            bets=[make_bet(103, self.event, 0, 0)],
+        )
+        main.database = FakeDatabase(events=[self.event], users=[leader, riser, third])
+
+        finished = main.finish_event_and_announce(event=self.event, result=EventResult(2, 1, None))
+
+        self.assertTrue(finished)
+        group_message = main.bot.messages_to(TARGET_CHAT_ID)[0]
+        self.assertIn('Движение в таблице:', group_message)
+        self.assertIn('Рывок матча: Борис с 2-го на 1-е место (+1 позиция).', group_message)
+        self.assertIn('Первое место теперь единолично: Борис.', group_message)
+
+    def test_skips_leaderboard_movement_when_nothing_changed(self):
+        first = make_user(
+            user_id=101,
+            first_name='Анна',
+            scores=8,
+            bets=[make_bet(101, self.event, 0, 0)],
+        )
+        second = make_user(
+            user_id=102,
+            first_name='Борис',
+            scores=6,
+            bets=[make_bet(102, self.event, 0, 0)],
+        )
+        main.database = FakeDatabase(events=[self.event], users=[first, second])
+
+        finished = main.finish_event_and_announce(event=self.event, result=EventResult(2, 1, None))
+
+        self.assertTrue(finished)
+        group_message = main.bot.messages_to(TARGET_CHAT_ID)[0]
+        self.assertNotIn('Движение в таблице:', group_message)
+
+
+class LeaderboardMovementFactsTest(unittest.TestCase):
+    def make_snapshot(self, users):
+        return main.build_leaderboard_snapshot(users)
+
+    def test_leader_gap_uses_correct_points_grammar(self):
+        before = self.make_snapshot([
+            make_user(101, 'Анна', scores=10),
+            make_user(102, 'Борис', scores=8),
+        ])
+        after = self.make_snapshot([
+            make_user(101, 'Анна', scores=10),
+            make_user(102, 'Борис', scores=9),
+        ])
+
+        facts = main.build_leaderboard_movement_facts(before=before, after=after)
+
+        self.assertIn('Отрыв лидера сократился: теперь впереди на 1 очко.', facts)
+
+    def test_announces_shared_first_place_only_when_it_appears_now(self):
+        before = self.make_snapshot([
+            make_user(101, 'Анна', scores=10),
+            make_user(102, 'Борис', scores=9),
+        ])
+        after = self.make_snapshot([
+            make_user(101, 'Анна', scores=10),
+            make_user(102, 'Борис', scores=10),
+        ])
+
+        facts = main.build_leaderboard_movement_facts(before=before, after=after)
+
+        self.assertIn('Первое место теперь делят: Анна и Борис.', facts)
+
+    def test_announces_first_points(self):
+        before = self.make_snapshot([
+            make_user(101, 'Анна', scores=3),
+            make_user(102, 'Борис', scores=0),
+            make_user(103, 'Вера', scores=0),
+        ])
+        after = self.make_snapshot([
+            make_user(101, 'Анна', scores=3),
+            make_user(102, 'Борис', scores=1),
+            make_user(103, 'Вера', scores=0),
+        ])
+
+        facts = main.build_leaderboard_movement_facts(before=before, after=after)
+
+        self.assertIn('Первые очки турнира: Борис.', facts)
+
+    def test_announces_top_three_entry(self):
+        before = self.make_snapshot([
+            make_user(101, 'Анна', scores=10),
+            make_user(102, 'Борис', scores=9),
+            make_user(103, 'Вера', scores=8),
+            make_user(104, 'Глеб', scores=6),
+        ])
+        after = self.make_snapshot([
+            make_user(101, 'Анна', scores=10),
+            make_user(102, 'Борис', scores=9),
+            make_user(103, 'Вера', scores=8),
+            make_user(104, 'Глеб', scores=8),
+        ])
+
+        fact = main.build_top_entry_fact(before=before, after=after)
+
+        self.assertEqual(fact, 'Глеб теперь в топ-3.')
+
+    def test_announces_tight_top_five_only_when_threshold_crossed(self):
+        before = self.make_snapshot([
+            make_user(101, 'Анна', scores=10),
+            make_user(102, 'Борис', scores=9),
+            make_user(103, 'Вера', scores=8),
+            make_user(104, 'Глеб', scores=7),
+            make_user(105, 'Даша', scores=6),
+        ])
+        after = self.make_snapshot([
+            make_user(101, 'Анна', scores=10),
+            make_user(102, 'Борис', scores=9),
+            make_user(103, 'Вера', scores=8),
+            make_user(104, 'Глеб', scores=8),
+            make_user(105, 'Даша', scores=8),
+        ])
+
+        fact = main.build_tight_top_fact(before=before, after=after)
+
+        self.assertEqual(fact, 'Топ-5 теперь разделяют всего 2 очка.')
 
 
 class ManualResultCommandTest(unittest.TestCase):

@@ -187,9 +187,16 @@ def finish_event_and_announce(event: Event, result: EventResult, confirmation_ch
         existing_event = database.get_event_by_uuid(uuid=event.uuid)
         if existing_event is None or existing_event.result is not None:
             return False
+        leaderboard_before = build_leaderboard_snapshot(database.get_all_users())
         existing_event.result = result
         database.update_event(event=existing_event)
         guessers = calculate_scores_after_finished_event(event=existing_event)
+        leaderboard_after = build_leaderboard_snapshot(database.get_all_users())
+        leaderboard_facts = build_leaderboard_movement_facts(
+            before=leaderboard_before,
+            after=leaderboard_after,
+        )
+        leaderboard_after_text = format_leaderboard_snapshot(leaderboard_after)
     # Матч ушёл из in-progress — состояние опроса API больше не нужно. Чистим здесь,
     # чтобы покрыть оба пути завершения: авто и ручной /result.
     api_poll_logged_states.pop(event.uuid, None)
@@ -276,8 +283,16 @@ def finish_event_and_announce(event: Event, result: EventResult, confirmation_ch
                 msg_text += '\n'
             msg_text += '\n'
 
+    if len(leaderboard_facts) > 0:
+        msg_text += 'Движение в таблице:'
+        msg_text += '\n'
+        for fact in leaderboard_facts:
+            msg_text += fact
+            msg_text += '\n'
+        msg_text += '\n'
+
     msg_text += '-----\n'
-    msg_text += get_leaderboard_text()
+    msg_text += leaderboard_after_text
     try:
         bot.send_message(chat_id=get_target_chat_id(), text=msg_text)
     except Exception as e:
@@ -1895,6 +1910,222 @@ def is_one_goal_from_total_score_with_two_or_more_scores(event_result: EventResu
         return bet.team_1_scores in [event_result.team_1_scores - 1, event_result.team_1_scores + 1]
     else:
         return False
+
+
+def build_leaderboard_snapshot(users: list[UserModel]) -> dict[int, dict]:
+    # Ранг = номер строки в текущем leaderboard: одинаковые очки делят одно место.
+    sorted_users = sorted(users, key=lambda x: (-x.scores, x.get_full_name().casefold(), x.id))
+    result = {}
+    current_rank = 0
+    previous_score = None
+    for user_model in sorted_users:
+        if previous_score is None or user_model.scores != previous_score:
+            current_rank += 1
+            previous_score = user_model.scores
+        result[user_model.id] = {
+            'name': user_model.get_full_name(),
+            'score': user_model.scores,
+            'rank': current_rank,
+        }
+    return result
+
+
+def format_leaderboard_snapshot(snapshot: dict[int, dict]) -> str:
+    scores_to_names = {}
+    for _, item in get_snapshot_items_sorted(snapshot):
+        score = item['score']
+        if score not in scores_to_names:
+            scores_to_names[score] = []
+        scores_to_names[score].append(item['name'])
+    lines = []
+    for score in sorted(scores_to_names.keys(), reverse=True):
+        lines.append(f'{", ".join(scores_to_names[score])}: {score}')
+    return '\n'.join(lines)
+
+
+def build_leaderboard_movement_facts(before: dict[int, dict], after: dict[int, dict]) -> list[str]:
+    facts = []
+    mentioned_user_ids = set()
+    main_mover = get_main_rank_riser(before=before, after=after)
+    if main_mover is not None:
+        user_id, old_rank, new_rank, delta = main_mover
+        fact = (f'Рывок матча: {after[user_id]["name"]} с {format_place_from(old_rank)} '
+                f'на {format_place_to(new_rank)} место (+{delta} {plural_ru(delta, "позиция", "позиции", "позиций")}).')
+        facts.append(fact)
+        mentioned_user_ids.add(user_id)
+
+    leader_fact = build_leader_change_fact(before=before, after=after)
+    if leader_fact is not None:
+        facts.append(leader_fact)
+
+    leader_gap_fact = build_leader_gap_fact(before=before, after=after)
+    if leader_gap_fact is not None:
+        facts.append(leader_gap_fact)
+
+    first_points_fact = build_first_points_fact(before=before, after=after, excluded_user_ids=mentioned_user_ids)
+    if first_points_fact is not None:
+        facts.append(first_points_fact)
+
+    top_entry_fact = build_top_entry_fact(before=before, after=after, excluded_user_ids=mentioned_user_ids)
+    if top_entry_fact is not None:
+        facts.append(top_entry_fact)
+
+    tight_top_fact = build_tight_top_fact(before=before, after=after)
+    if tight_top_fact is not None:
+        facts.append(tight_top_fact)
+
+    return facts[:3]
+
+
+def get_main_rank_riser(before: dict[int, dict], after: dict[int, dict]) -> tuple[int, int, int, int] | None:
+    risers = []
+    for user_id, after_item in after.items():
+        if user_id not in before:
+            continue
+        old_rank = before[user_id]['rank']
+        new_rank = after_item['rank']
+        delta = old_rank - new_rank
+        if delta <= 0:
+            continue
+        risers.append((user_id, old_rank, new_rank, delta))
+    if len(risers) == 0:
+        return None
+    risers.sort(key=lambda x: (-x[3], x[2], after[x[0]]['name'].casefold(), x[0]))
+    return risers[0]
+
+
+def build_leader_change_fact(before: dict[int, dict], after: dict[int, dict]) -> str | None:
+    before_leaders = get_leader_ids(before)
+    after_leaders = get_leader_ids(after)
+    if before_leaders == after_leaders:
+        return None
+    leader_names = format_names([after[user_id]['name'] for user_id in sorted(after_leaders)])
+    if len(after_leaders) == 1:
+        return f'Первое место теперь единолично: {leader_names}.'
+    return f'Первое место теперь делят: {leader_names}.'
+
+
+def build_leader_gap_fact(before: dict[int, dict], after: dict[int, dict]) -> str | None:
+    before_leaders = get_leader_ids(before)
+    after_leaders = get_leader_ids(after)
+    if before_leaders != after_leaders or len(after_leaders) != 1:
+        return None
+    before_gap = get_unique_leader_gap(before)
+    after_gap = get_unique_leader_gap(after)
+    if before_gap is None or after_gap is None or before_gap == after_gap:
+        return None
+    points = plural_ru(after_gap, 'очко', 'очка', 'очков')
+    if after_gap > before_gap:
+        return f'Лидер увеличил отрыв: теперь впереди на {after_gap} {points}.'
+    return f'Отрыв лидера сократился: теперь впереди на {after_gap} {points}.'
+
+
+def build_first_points_fact(before: dict[int, dict], after: dict[int, dict],
+                            excluded_user_ids: set[int] | None = None) -> str | None:
+    excluded_user_ids = excluded_user_ids or set()
+    users = []
+    for user_id, after_item in after.items():
+        if user_id in excluded_user_ids or user_id not in before:
+            continue
+        if before[user_id]['score'] == 0 and after_item['score'] > 0:
+            users.append((user_id, after_item))
+    if len(users) == 0:
+        return None
+    users.sort(key=lambda x: (-x[1]['score'], x[1]['name'].casefold(), x[0]))
+    names = format_names([item['name'] for _, item in users])
+    return f'Первые очки турнира: {names}.'
+
+
+def build_top_entry_fact(before: dict[int, dict], after: dict[int, dict],
+                         excluded_user_ids: set[int] | None = None) -> str | None:
+    excluded_user_ids = excluded_user_ids or set()
+    users = []
+    for user_id, after_item in after.items():
+        if user_id in excluded_user_ids or user_id not in before:
+            continue
+        if before[user_id]['rank'] > 3 and after_item['rank'] <= 3:
+            users.append((user_id, after_item))
+    if len(users) == 0:
+        return None
+    users.sort(key=lambda x: (x[1]['rank'], -x[1]['score'], x[1]['name'].casefold(), x[0]))
+    names = format_names([item['name'] for _, item in users])
+    if len(users) == 1:
+        return f'{names} теперь в топ-3.'
+    return f'В топ-3 теперь: {names}.'
+
+
+def build_tight_top_fact(before: dict[int, dict], after: dict[int, dict]) -> str | None:
+    before_range = get_top_score_range(before, size=5)
+    after_range = get_top_score_range(after, size=5)
+    if before_range is None or after_range is None:
+        return None
+    if before_range <= 2 or after_range > 2:
+        return None
+    if after_range == 0:
+        return 'Топ-5 теперь идут вровень.'
+    points = plural_ru(after_range, 'очко', 'очка', 'очков')
+    return f'Топ-5 теперь разделяют всего {after_range} {points}.'
+
+
+def get_leader_ids(snapshot: dict[int, dict]) -> set[int]:
+    return {user_id for user_id, item in snapshot.items() if item['rank'] == 1}
+
+
+def get_unique_leader_gap(snapshot: dict[int, dict]) -> int | None:
+    leaders = get_leader_ids(snapshot)
+    if len(leaders) != 1 or len(snapshot) < 2:
+        return None
+    leader_id = next(iter(leaders))
+    leader_score = snapshot[leader_id]['score']
+    follower_scores = [item['score'] for user_id, item in snapshot.items() if user_id != leader_id]
+    return leader_score - max(follower_scores)
+
+
+def get_top_score_range(snapshot: dict[int, dict], size: int) -> int | None:
+    items = get_snapshot_items_sorted(snapshot)
+    if len(items) < size:
+        return None
+    top_items = items[:size]
+    scores = [item['score'] for _, item in top_items]
+    return max(scores) - min(scores)
+
+
+def get_snapshot_items_sorted(snapshot: dict[int, dict]) -> list[tuple[int, dict]]:
+    return sorted(snapshot.items(), key=lambda x: (-x[1]['score'], x[1]['name'].casefold(), x[0]))
+
+
+def format_names(names: list[str]) -> str:
+    names = sorted(names, key=lambda x: x.casefold())
+    if len(names) == 0:
+        return ''
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f'{names[0]} и {names[1]}'
+    if len(names) <= 4:
+        return f'{", ".join(names[:-1])} и {names[-1]}'
+    visible_names = names[:4]
+    return f'{", ".join(visible_names)} и ещё {len(names) - len(visible_names)}'
+
+
+def format_place_from(rank: int) -> str:
+    return f'{rank}-го'
+
+
+def format_place_to(rank: int) -> str:
+    return f'{rank}-е'
+
+
+def plural_ru(value: int, one: str, few: str, many: str) -> str:
+    value = abs(value)
+    if value % 100 in range(11, 15):
+        return many
+    last_digit = value % 10
+    if last_digit == 1:
+        return one
+    if last_digit in range(2, 5):
+        return few
+    return many
 
 
 def get_leaderboard_text() -> str:
