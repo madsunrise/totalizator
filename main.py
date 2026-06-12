@@ -2198,6 +2198,9 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
     guessed_who_has_gone_through_count = 0
     one_goal_from_total_score_count_with_winner_consider = 0
     one_goal_from_total_score_count_exclude_winner = 0
+    triggered_jokers_count = 0
+    joker_bets_count = 0
+    joker_bonus_scores = 0
     events = database.get_all_events()
     for event in events:
         result = event.result
@@ -2207,6 +2210,11 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
         if user_bet is None:
             continue
         is_guessed_event = calculate_if_user_guessed_result(event_result=result, bet=user_bet)
+        if user_bet.is_joker:
+            joker_bets_count += 1
+            if is_guessed_event is not None:
+                triggered_jokers_count += 1
+                joker_bonus_scores += convert_guessed_event_to_scores(is_guessed_event)
         match is_guessed_event:
             case GuessedEvent.WINNER:
                 guessed_only_winner_count += 1
@@ -2231,6 +2239,9 @@ def get_user_detailed_statistic(user_model: UserModel) -> DetailedStatistic:
         guessed_who_has_gone_through_count=guessed_who_has_gone_through_count,
         one_goal_from_total_score_count_with_winner_consider=one_goal_from_total_score_count_with_winner_consider,
         one_goal_from_total_score_count_exclude_winner=one_goal_from_total_score_count_exclude_winner,
+        triggered_jokers_count=triggered_jokers_count,
+        joker_bets_count=joker_bets_count,
+        joker_bonus_scores=joker_bonus_scores,
     )
 
 
@@ -2241,6 +2252,8 @@ def get_user_statistic_formatted_text(statistic: DetailedStatistic) -> str:
     text += f'Ничьи: {statistic.guessed_draw_count}\n'
     text += f'Победитель: {statistic.guessed_only_winner_count}\n'
     text += f'Проходы: {statistic.guessed_who_has_gone_through_count}\n'
+    text += (f'Джокеры: {statistic.triggered_jokers_count}/{statistic.joker_bets_count}, '
+             f'бонус: +{statistic.joker_bonus_scores} очков\n')
     text += f'В одном мяче от ТС с учётом исхода матча: {statistic.one_goal_from_total_score_count_with_winner_consider}\n'
     text += f'В одном мяче от ТС в иных случаях (только матчи с двумя и более голами): {statistic.one_goal_from_total_score_count_exclude_winner}\n'
     return text.strip()

@@ -154,6 +154,9 @@ class DetailedStatistic:
                  guessed_who_has_gone_through_count: int,
                  one_goal_from_total_score_count_with_winner_consider: int,
                  one_goal_from_total_score_count_exclude_winner: int,
+                 triggered_jokers_count: int,
+                 joker_bets_count: int,
+                 joker_bonus_scores: int,
                  ):
         self.user_model = user_model
         self.guessed_total_score_count = guessed_total_score_count
@@ -163,6 +166,9 @@ class DetailedStatistic:
         self.guessed_who_has_gone_through_count = guessed_who_has_gone_through_count
         self.one_goal_from_total_score_count_with_winner_consider = one_goal_from_total_score_count_with_winner_consider
         self.one_goal_from_total_score_count_exclude_winner = one_goal_from_total_score_count_exclude_winner
+        self.triggered_jokers_count = triggered_jokers_count
+        self.joker_bets_count = joker_bets_count
+        self.joker_bonus_scores = joker_bonus_scores
 
 
 class Group:

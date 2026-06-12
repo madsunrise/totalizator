@@ -471,5 +471,50 @@ class ManualResultCommandTest(unittest.TestCase):
         self.assertEqual(main.bot.messages_to(TARGET_CHAT_ID), [])
 
 
+class DetailedAnalyticsTest(unittest.TestCase):
+    def make_finished_event(self, uuid: str, team_1_scores: int, team_2_scores: int) -> Event:
+        return Event(
+            uuid=uuid,
+            team_1=f'{uuid}-1',
+            team_2=f'{uuid}-2',
+            time=datetime.now(timezone.utc) - timedelta(hours=2),
+            event_type=EventType.GROUP_STAGE,
+            result=EventResult(team_1_scores, team_2_scores, None),
+        )
+
+    def make_pending_event(self, uuid: str) -> Event:
+        return Event(
+            uuid=uuid,
+            team_1=f'{uuid}-1',
+            team_2=f'{uuid}-2',
+            time=datetime.now(timezone.utc) + timedelta(hours=2),
+            event_type=EventType.GROUP_STAGE,
+        )
+
+    def test_reports_triggered_jokers_and_bonus_points_for_finished_matches_only(self):
+        exact_score_event = self.make_finished_event('exact', 2, 1)
+        goal_difference_event = self.make_finished_event('goal-difference', 3, 1)
+        missed_event = self.make_finished_event('missed', 1, 0)
+        pending_event = self.make_pending_event('pending')
+        user = make_user(101, 'Анна', bets=[
+            make_bet(101, exact_score_event, 2, 1, is_joker=True),
+            make_bet(101, goal_difference_event, 2, 0, is_joker=True),
+            make_bet(101, missed_event, 0, 0, is_joker=True),
+            make_bet(101, pending_event, 4, 2, is_joker=True),
+        ])
+        main.database = FakeDatabase(
+            events=[exact_score_event, goal_difference_event, missed_event, pending_event],
+            users=[user],
+        )
+
+        statistic = main.get_user_detailed_statistic(user_model=user)
+        text = main.get_user_statistic_formatted_text(statistic=statistic)
+
+        self.assertEqual(statistic.triggered_jokers_count, 2)
+        self.assertEqual(statistic.joker_bets_count, 3)
+        self.assertEqual(statistic.joker_bonus_scores, 7)
+        self.assertIn('Джокеры: 2/3, бонус: +7 очков', text)
+
+
 if __name__ == '__main__':
     unittest.main()
