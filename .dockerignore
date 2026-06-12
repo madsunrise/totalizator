@@ -5,3 +5,9 @@ __pycache__/
 .vscode/
 node_modules/
 *.log
+*.tar
+**/*.tar
+*.tar.gz
+**/*.tar.gz
+*.tgz
+**/*.tgz
